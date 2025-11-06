@@ -27,17 +27,16 @@ Implementation Notes
 
 * MicroPython
 
-TODO: DEBUG
-Traceback (most recent call last):
-  File "<stdin>", line 37, in <module>
-  File "/lib/bno08x.py", line 705, in acceleration
-  File "/lib/bno08x.py", line 900, in _process_available_packets
-  File "/lib/i2c.py", line 92, in _read_packet
-NameError: name 'PacketError' isn't defined
-
-TODO: Euler/quaternion implementation
-TODO: add TARE
-TODO: update RAW_Sensors
+TODO BRC enabling all activities seems like overkill
+TODO: BRC Euler/quaternion implementation
+TODO: BRC add TARE
+TODO: BRC update RAW_Sensors
+# TODO:
+# Default Reports Frequencies (Hz) - does this code have report frequencies right?
+# Calibrated Acceleration (m/s2)
+# Euler Angles (in degrees?)
+# CALIBRATION
+# RAW ACCEL, MAG, GYRO # Sfe says each needs the non-raw enabled to work
 """
 
 __version__ = "0.1"
@@ -125,13 +124,6 @@ BNO_REPORT_ARVR_STABILIZED_ROTATION_VECTOR = const(0x28)
 BNO_REPORT_ARVR_STABILIZED_GAME_ROTATION_VECTOR = const(0x29)
 BNO_REPORT_GYRO_INTEGRATED_ROTATION_VECTOR = const(0x2A)
 
-# TODO:
-# Default Reports Frequencies (Hz) - does this code have report frequencies right?
-# Calibrated Acceleration (m/s2)
-# Euler Angles (in degrees?)
-# CALIBRATION
-# RAW ACCEL, MAG, GYRO # Sfe says each needs the non-raw enabled to work
-
 _DEFAULT_REPORT_INTERVAL = const(50000)  # in microseconds = 50ms
 _QUAT_READ_TIMEOUT = 0.500  # timeout in seconds
 _PACKET_READ_TIMEOUT = 2.000  # timeout in seconds
@@ -200,6 +192,16 @@ _RAW_REPORTS = {
     BNO_REPORT_UNCALIBRATED_MAGNETOMETER: BNO_REPORT_MAGNETOMETER,  # For testing
 }
 
+# The last cause of the processor reset.
+_RESET_CAUSE_STRING = [
+    "Not Applicable",
+    "Power On Reset",
+    "Internal System Reset",
+    "Watchdog Timeout",
+    "External Reset",
+    "Other",
+]
+
 # Available sensor reports
 _AVAIL_SENSOR_REPORTS = {
     BNO_REPORT_ACCELEROMETER: (_Q_POINT_8_SCALAR, 3, 10),
@@ -249,7 +251,7 @@ _INITIAL_REPORTS = {
     BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR: (0.0, 0.0, 0.0, 0.0),
 }
 
-# TODO BRC enabling all seems like overkill
+# TODO BRC enabling all activities seems like overkill
 _ENABLED_ACTIVITIES = 0x1FF  # All activities; 1 bit set for each of 8 activities, + Unknown
 
 DATA_BUFFER_SIZE = const(512)  # data buffer size. obviously eats ram
@@ -272,7 +274,7 @@ REPORT_ACCURACY_STATUS = [
 
 
 class PacketError(Exception):
-    """Raised when the packet couldnt be parsed"""
+    """Raised when the packet could not be parsed"""
 
     pass
 
@@ -287,20 +289,24 @@ def _elapsed_sec(start_time):
     return ticks_diff(ticks_ms(), start_time) / 1000.0
 
 
-############ PACKET PARSING ###########################
+############ REPORT PARSING ###########################
 def _parse_sensor_report_data(report_bytes: bytearray) -> tuple[tuple, int]:
     """Parses reports with only 16-bit fields"""
     data_offset = 4  # this may not always be true
     report_id = report_bytes[0]
     scalar, count, _report_length = _AVAIL_SENSOR_REPORTS[report_id]
-    if report_id in _RAW_REPORTS:
-        # raw reports are unsigned
-        format_str = "<H"
-    else:
-        format_str = "<h"
     results = []
-    accuracy = unpack_from("<B", report_bytes, 2)[0]
-    accuracy &= 0b11
+
+    format_str = "<H" if report_id in _RAW_REPORTS else "<h"
+
+    byte2 = unpack_from("<B", report_bytes, 2)[0]
+    byte3 = unpack_from("<B", report_bytes, 3)[0]
+    accuracy = byte2 & 0x03
+
+    # Extract delay upper 6 bits (bits 7:2), combine and adjust from 100us units
+    delay_upper = (byte2 >> 2) & 0x3F
+    delay_raw = (delay_upper << 8) | byte3
+    delay_us = delay_raw * 100
 
     for _offset_idx in range(count):
         total_offset = data_offset + (_offset_idx * 2)
@@ -309,10 +315,17 @@ def _parse_sensor_report_data(report_bytes: bytearray) -> tuple[tuple, int]:
         results.append(scaled_data)
     results_tuple = tuple(results)
 
-    return (results_tuple, accuracy)
+    return results_tuple, accuracy, delay_us
 
 
-def _parse_step_couter_report(report_bytes: bytearray) -> int:
+def _report_length(report_id: int) -> int:
+    if report_id < 0xF0:  # it's a sensor report
+        return _AVAIL_SENSOR_REPORTS[report_id][2]
+
+    return _REPORT_LENGTHS[report_id]
+
+
+def _parse_step_counter_report(report_bytes: bytearray) -> int:
     return unpack_from("<H", report_bytes, 8)[0]
 
 
@@ -321,41 +334,28 @@ def _parse_stability_classifier_report(report_bytes: bytearray) -> str:
     return ["Unknown", "On Table", "Stationary", "Stable", "In motion"][classification_bitfield]
 
 
-# report_id
-# feature_report_id
-# feature_flags
-# change_sensitivity
-# report_interval
-# batch_interval_word
-# sensor_specific_configuration_word
-# BRC
-# def _parse_get_feature_response_report(report_bytes: bytearray) -> tuple[Any, ...]:
+# Set Feature Command (0xfd) - host to sensor in SH-2 (6.5.4)
+# report_id (B), feature_report_id(B), feature_flags (B), change_sensitivity(H),
+# report_interval (I), batch_interval_word (I), sensor_specific_configuration_word  (I),
 def _parse_get_feature_response_report(report_bytes: bytearray):
     return unpack_from("<BBBHIII", report_bytes)
 
 
-# 0 Report ID = 0x1E
-# 1 Sequence number
-# 2 Status
-# 3 Delay
-# 4 Page Number + EOS
-# 5 Most likely state
-# 6-15 Classification (10 x Page Number) + confidence
+# Personal Activity Classifier (0x1E), in SH-2 (6.5.36)
 def _parse_activity_classifier_report(report_bytes: bytearray) -> dict[str, str]:
     activities = [
         "Unknown",
-        "In-Vehicle",  # look
-        "On-Bicycle",  # at
-        "On-Foot",  # all
-        "Still",  # this
-        "Tilting",  # room
-        "Walking",  # for
-        "Running",  # activities
+        "In-Vehicle",
+        "On-Bicycle",
+        "On-Foot",
+        "Still",
+        "Tilting",
+        "Walking",
+        "Running",
         "OnStairs",
     ]
 
     end_and_page_number = unpack_from("<B", report_bytes, 4)[0]
-    # last_page = (end_and_page_number & 0b10000000) > 0
     page_number = end_and_page_number & 0x7F
     most_likely = unpack_from("<B", report_bytes, 5)[0]
     confidences = unpack_from("<BBBBBBBBB", report_bytes, 6)
@@ -371,7 +371,7 @@ def _parse_activity_classifier_report(report_bytes: bytearray) -> dict[str, str]
 
 def _parse_shake_report(report_bytes: bytearray) -> bool:
     shake_bitfield = unpack_from("<H", report_bytes, 4)[0]
-    return (shake_bitfield & 0x111) > 0
+    return (shake_bitfield & 0x07) > 0
 
 
 def parse_sensor_id(buffer: bytearray) -> tuple[int, ...]:
@@ -379,7 +379,6 @@ def parse_sensor_id(buffer: bytearray) -> tuple[int, ...]:
     if not buffer[0] == _SHTP_REPORT_PRODUCT_ID_RESPONSE:
         raise AttributeError("Wrong report id for sensor id: %s" % hex(buffer[0]))
 
-    # TODO BRC add debug messages to print reset_cause
     reset_cause = unpack_from("<B", buffer, 1)[0]
     sw_major = unpack_from("<B", buffer, 2)[0]
     sw_minor = unpack_from("<B", buffer, 3)[0]
@@ -387,11 +386,10 @@ def parse_sensor_id(buffer: bytearray) -> tuple[int, ...]:
     sw_build_number = unpack_from("<I", buffer, 8)[0]
     sw_patch = unpack_from("<H", buffer, 12)[0]
 
-    return (sw_part_number, sw_major, sw_minor, sw_patch, sw_build_number)
+    return reset_cause, sw_part_number, sw_major, sw_minor, sw_patch, sw_build_number
 
 
-# BRC
-# def _parse_command_response(report_bytes: bytearray) -> tuple[Any, Any]:
+############ COMMAND PARSING ###########################
 def _parse_command_response(report_bytes: bytearray):
     # CMD response report:
     # 0 Report ID = 0xF1
@@ -403,16 +401,9 @@ def _parse_command_response(report_bytes: bytearray):
     # to the response for each command.
     report_body = unpack_from("<BBBBB", report_bytes)
     response_values = unpack_from("<BBBBBBBBBBB", report_bytes, 5)
-    return (report_body, response_values)
+    return report_body, response_values
 
 
-# BRC
-# def _insert_command_request_report(
-#     command: int,
-#     buffer: bytearray,
-#     next_sequence_number: int,
-#     command_params: Optional[list[int]] = None,
-# ) -> None:
 def _insert_command_request_report(
         command: int,
         buffer: bytearray,
@@ -436,15 +427,6 @@ def _insert_command_request_report(
         buffer[3 + idx] = param
 
 
-def _report_length(report_id: int) -> int:
-    if report_id < 0xF0:  # it's a sensor report
-        return _AVAIL_SENSOR_REPORTS[report_id][2]
-
-    return _REPORT_LENGTHS[report_id]
-
-
-# BRC
-# def _separate_batch(packet: Packet, report_slices: list[Any]) -> None:
 def _separate_batch(packet, report_slices):
     # get first report id, loop up its report length
     # read that many bytes, parse them
@@ -478,8 +460,7 @@ class Packet:
         length = self.header.packet_byte_count
         outstr = "\n\t\t********** Packet *************\n"
         outstr += "DBG::\t\t HEADER:\n"
-
-        outstr += "DBG::\t\t Data Len: %d\n" % (self.header.data_length)
+        outstr += "DBG::\t\t Data Len: %d\n" % self.header.data_length
         outstr += "DBG::\t\t Channel: %s (%d)\n" % (
             channels[self.channel_number],
             self.channel_number,
@@ -754,7 +735,7 @@ class BNO08X:
 
     @property
     def stability_classification(self):
-        """Returns the sensor's assessment of it's current stability, one of:
+        """Returns the sensor's assessment of its current stability, one of:
 
         * "Unknown" - The sensor is unable to classify the current stability
         * "On Table" - The sensor is at rest on a stable surface with very little vibration
@@ -989,16 +970,18 @@ class BNO08X:
     def _handle_control_report(self, report_id: int, report_bytes: bytearray) -> None:
         if report_id == _SHTP_REPORT_PRODUCT_ID_RESPONSE:
             (
+                reset_cause,
                 sw_part_number,
                 sw_major,
                 sw_minor,
                 sw_patch,
                 sw_build_number,
             ) = parse_sensor_id(report_bytes)
-            self._dbg("FROM PACKET SLICE:")
-            self._dbg("*** Part Number: %d" % sw_part_number)
-            self._dbg("*** Software Version: %d.%d.%d" % (sw_major, sw_minor, sw_patch))
-            self._dbg("\tBuild: %d" % (sw_build_number))
+            self._dbg("Product ID Response (0xf8):")
+            self._dbg(f"Last reset cause: {reset_cause} = {_RESET_CAUSE_STRING[reset_cause]}")
+            self._dbg(f"*** Part Number: {sw_part_number}")
+            self._dbg(f"*** Software Version: {sw_major}.{sw_minor}.{sw_patch}")
+            self._dbg(f"\tBuild: {sw_build_number}")
             self._dbg("")
 
         if report_id == _GET_FEATURE_RESPONSE:
@@ -1034,10 +1017,15 @@ class BNO08X:
                 raise RuntimeError("Unable to save calibration data")
 
     def _process_report(self, report_id: int, report_bytes: bytearray) -> None:
+        """
+        Process reports
+        Extract accuracy and delay from each report
+        TODO: BRC determine how to expose accuracy and delay to users
+        """
         if report_id >= 0xF0:
             self._handle_control_report(report_id, report_bytes)
             return
-        self._dbg("\tProcessing report:", reports[report_id])
+        self._dbg(f"Processing report: {reports[report_id]}")
         if self._debug:
             outstr = ""
             for idx, packet_byte in enumerate(report_bytes):
@@ -1049,7 +1037,7 @@ class BNO08X:
             self._dbg("")
 
         if report_id == BNO_REPORT_STEP_COUNTER:
-            self._readings[report_id] = _parse_step_couter_report(report_bytes)
+            self._readings[report_id] = _parse_step_counter_report(report_bytes)
             return
 
         if report_id == BNO_REPORT_SHAKE_DETECTOR:
@@ -1071,9 +1059,14 @@ class BNO08X:
             activity_classification = _parse_activity_classifier_report(report_bytes)
             self._readings[BNO_REPORT_ACTIVITY_CLASSIFIER] = activity_classification
             return
-        sensor_data, accuracy = _parse_sensor_report_data(report_bytes)
+
+        # sensor_data is a tuple
+        sensor_data, accuracy, delay_us = _parse_sensor_report_data(report_bytes)
+        self._dbg(f"Report: {reports[report_id]}, {sensor_data=}, {accuracy=}, {delay_us=}")
+        # TODO: BRC only magnetic accuracy can be user visible, but all reports have accuracy
         if report_id == BNO_REPORT_MAGNETOMETER:
             self._magnetometer_accuracy = accuracy
+
         # TODO: FIXME; Sensor reports are batched in a LIFO which means that multiple reports
         # for the same type will end with the oldest/last being kept and the other
         # newer reports thrown away
@@ -1106,12 +1099,12 @@ class BNO08X:
         report_interval = int(1_000_000 / AVAIL_REPORT_FREQ[feature_id])  # delay in micro_s
         pack_into("<I", set_feature_report, 5, report_interval)
         if feature_id == BNO_REPORT_ACTIVITY_CLASSIFIER:
-            pack_into("<I", set_feature_report, 13, ENABLED_ACTIVITIES)
+            pack_into("<I", set_feature_report, 13, _ENABLED_ACTIVITIES)
 
         feature_dependency = _RAW_REPORTS.get(feature_id, None)
         # if the feature was enabled it will have a key in the readings dict
         if feature_dependency and feature_dependency not in self._readings:
-            self._dbg("\tEnabling feature depencency:", feature_dependency)
+            self._dbg("\tEnabling feature dependency:", feature_dependency)
             self.enable_feature(feature_dependency)
 
         self._send_packet(_BNO_CHANNEL_CONTROL, set_feature_report)
@@ -1196,7 +1189,7 @@ class BNO08X:
         self._dbg("")
         self._dbg("*** Part Number: %d" % sw_part_number)
         self._dbg("*** Software Version: %d.%d.%d" % (sw_major, sw_minor, sw_patch))
-        self._dbg(" Build: %d" % (sw_build_number))
+        self._dbg(" Build: %d" % sw_build_number)
         self._dbg("")
         # TODO: this is only one of the numbers!
         return sw_part_number

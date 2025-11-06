@@ -18,11 +18,7 @@ from struct import pack_into
 
 from micropython import const
 
-from bno08x import BNO08X, Packet, DATA_BUFFER_SIZE
-
-# from bno08x import DATA_BUFFER_SIZE, Packet, PacketError
-#
-
+from bno08x import BNO08X, Packet, PacketError, DATA_BUFFER_SIZE
 
 _BNO08X_DEFAULT_ADDRESS = const(0x4B)
 
