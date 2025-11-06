@@ -31,7 +31,7 @@ Optional parameters:
 
 - address : if using 2 BNO08x you need set each up separately (depending on board, add solder jump or cut wire)
 - reset_pin : required to enable sensor hard reset (Pin object not number). If not defined, a soft reset will be used.
-- int_pin : required to time synchronize sensor and host to enable microsecond accuracy timestamps. Define a Pin object. Not required if only 200 millisecond host-based timestamps are adequate, or if timestamps are not required.
+- int_pin : required to time synchronize sensor and host to enable microsecond accuracy timestamps. Define a Pin object. Not required if only 200-millisecond host-based timestamps are adequate, or if timestamps are not required.
 - debug : print very detailed logs, mainly for debugging driver
 
 ## Enable the sensor reports
@@ -67,6 +67,16 @@ Additional reports:
         BNO_REPORT_GYRO_INTEGRATED_ROTATION_VECTOR
 
 There are additional sensor reports that this driver has not fully implemented. See code and references for details.
+
+## Option to Change Sensor Report Frequency
+
+The default sensor report frequency is 20 Hz. The number of reports per second that the BNO08X can reliably deliver is dependent on the interface bandwidth
+and the number of reports that a BNO08X is asked to generate. I2C will definitely limit this frequency (est 10 to 50 Hz with a few reports). One should consider SPI for higher frequencies.
+Refer to the BNO080_085-Datasheet.pdf (page 50) for Maximum sensor report rates by report type. Some sensor reports can be updated at 400 to 100 Hz on SPI (untested). If your code request faster than the report feature frequency specified, repeated values will be returned.
+
+Before getting sensor results the reports must be enabled:
+
+    bno.enable_feature(BNO_REPORT_ACCELEROMETER, 40)  # for accelerometer at 40 Hertz
 
 ## Getting the sensor results:
 
