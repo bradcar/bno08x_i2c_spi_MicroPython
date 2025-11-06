@@ -21,16 +21,29 @@ Implementation Notes
 
 **Hardware:**
 
-* `bno086
+* bno086
 
 **Software and Dependencies:**
 
 * MicroPython
+
+TODO: DEBUG
+Traceback (most recent call last):
+  File "<stdin>", line 37, in <module>
+  File "/lib/bno08x.py", line 705, in acceleration
+  File "/lib/bno08x.py", line 900, in _process_available_packets
+  File "/lib/i2c.py", line 92, in _read_packet
+NameError: name 'PacketError' isn't defined
+
+TODO: Euler/quaternion implementation
+TODO: add TARE
+TODO: update RAW_Sensors
 """
 
 __version__ = "0.1"
 __repo__ = "https:# github.com/BRC *****.bit"
 
+from math import asin, atan2, degrees
 from struct import pack_into, unpack_from
 
 from collections import namedtuple
@@ -38,7 +51,7 @@ from micropython import const
 from utime import ticks_ms, sleep_ms, ticks_diff
 
 # import support files
-from debug import channels, reports, reset_causes
+from debug import channels, reports
 
 BNO_CHANNEL_SHTP_COMMAND = const(0)
 BNO_CHANNEL_EXE = const(1)
@@ -73,22 +86,22 @@ _ME_CALIBRATE = const(0x7)
 _ME_CAL_CONFIG = const(0x00)
 _ME_GET_CAL = const(0x01)
 
-# Calibrated Acceleration (m/s2)
-BNO_REPORT_ACCELEROMETER = const(0x01)
-# Calibrated gyroscope (rad/s).
-BNO_REPORT_GYROSCOPE = const(0x02)
-# Magnetic field calibrated (in µTesla). The fully calibrated magnetic field measurement.
-BNO_REPORT_MAGNETOMETER = const(0x03)
-# Linear acceleration (m/s2). Acceleration of the device with gravity removed
-BNO_REPORT_LINEAR_ACCELERATION = const(0x04)
-# Rotation Vector
-BNO_REPORT_ROTATION_VECTOR = const(0x05)
-# Gravity Vector (m/s2). Vector direction of gravity
-BNO_REPORT_GRAVITY = const(0x06)
-# Game Rotation Vector
-BNO_REPORT_GAME_ROTATION_VECTOR = const(0x08)
-
+# Reports Summary depending on BNO device
+BNO_REPORT_ACCELEROMETER = const(0x01)  # Calibrated Acceleration (m/s2)
+BNO_REPORT_GYROSCOPE = const(0x02)  # Calibrated gyroscope (rad/s).
+BNO_REPORT_MAGNETOMETER = const(0x03)  # Magnetic field calibrated (in µTesla).
+BNO_REPORT_LINEAR_ACCELERATION = const(0x04)  # Linear acceleration (m/s2) with gravity removed
+BNO_REPORT_ROTATION_VECTOR = const(0x05)  # Rotation Vector
+BNO_REPORT_GRAVITY = const(0x06)  # Gravity Vector (m/s2). Vector direction of gravity
+BNO_REPORT_UNCALIBRATED_GYROSCOPE = const(0x07)
+BNO_REPORT_GAME_ROTATION_VECTOR = const(0x08)  # Game Rotation Vector
 BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR = const(0x09)
+BNO_REPORT_PRESSURE = const(0x0A)
+BNO_REPORT_AMBIENT_LIGHT = const(0x0B)
+BNO_REPORT_HUMIDITY = const(0x0C)
+BNO_REPORT_PROXIMITY = const(0x0D)
+BNO_REPORT_TEMPERATURE = const(0x0E)
+BNO_REPORT_UNCALIBRATED_MAGNETOMETER = const(0x0F)
 BNO_REPORT_TAP_DETECTOR = const(0x10)
 BNO_REPORT_STEP_COUNTER = const(0x11)
 BNO_REPORT_SIGNIFICANT_MOTION = const(0x12)
@@ -96,11 +109,22 @@ BNO_REPORT_STABILITY_CLASSIFIER = const(0x13)
 BNO_REPORT_RAW_ACCELEROMETER = const(0x14)
 BNO_REPORT_RAW_GYROSCOPE = const(0x15)
 BNO_REPORT_RAW_MAGNETOMETER = const(0x16)
+BNO_REPORT_SAR = const(0x17)
 BNO_REPORT_STEP_DETECTOR = const(0x18)
 BNO_REPORT_SHAKE_DETECTOR = const(0x19)
-
+BNO_REPORT_FLIP_DETECTOR = const(0x1A)
+BNO_REPORT_PICKUP_DETECTOR = const(0x1B)
+BNO_REPORT_STABILITY_DETECTOR = const(0x1C)
 BNO_REPORT_ACTIVITY_CLASSIFIER = const(0x1E)
+BNO_REPORT_SLEEP_DETECTOR = const(0x1F)
+BNO_REPORT_TILT_DETECTOR = const(0x20)
+BNO_REPORT_POCKET_DETECTOR = const(0x21)
+BNO_REPORT_CIRCLE_DETECTOR = const(0x22)
+BNO_REPORT_HEART_RATE_MONITOR = const(0x23)
+BNO_REPORT_ARVR_STABILIZED_ROTATION_VECTOR = const(0x28)
+BNO_REPORT_ARVR_STABILIZED_GAME_ROTATION_VECTOR = const(0x29)
 BNO_REPORT_GYRO_INTEGRATED_ROTATION_VECTOR = const(0x2A)
+
 # TODO:
 # Default Reports Frequencies (Hz) - does this code have report frequencies right?
 # Calibrated Acceleration (m/s2)
@@ -116,6 +140,36 @@ _DEFAULT_TIMEOUT = 2.0  # timeout in seconds
 _BNO08X_CMD_RESET = const(0x01)
 _QUAT_Q_POINT = const(14)  # TODO dobodu sets to 0x05 ???
 _BNO_HEADER_LEN = const(4)
+
+# Report Frequencies in Hertz
+DEFAULT_REPORT_FREQ = 20
+AVAIL_REPORT_FREQ = {
+    BNO_REPORT_ACCELEROMETER: 20,
+    BNO_REPORT_GYROSCOPE: 20,
+    BNO_REPORT_MAGNETOMETER: 20,
+    BNO_REPORT_LINEAR_ACCELERATION: 20,
+    BNO_REPORT_ROTATION_VECTOR: 10,
+    BNO_REPORT_GRAVITY: 10,
+    BNO_REPORT_GAME_ROTATION_VECTOR: 10,
+    BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR: 10,
+    BNO_REPORT_PRESSURE: 2,
+    BNO_REPORT_AMBIENT_LIGHT: 10,
+    BNO_REPORT_HUMIDITY: 2,
+    BNO_REPORT_PROXIMITY: 10,
+    BNO_REPORT_TEMPERATURE: 2,
+    BNO_REPORT_STEP_COUNTER: 5,
+    BNO_REPORT_SHAKE_DETECTOR: 20,
+    BNO_REPORT_STABILITY_CLASSIFIER: 2,
+    BNO_REPORT_ACTIVITY_CLASSIFIER: 2,
+    BNO_REPORT_RAW_ACCELEROMETER: 20,
+    BNO_REPORT_RAW_GYROSCOPE: 20,
+    BNO_REPORT_RAW_MAGNETOMETER: 20,
+    BNO_REPORT_UNCALIBRATED_GYROSCOPE: 20,
+    BNO_REPORT_UNCALIBRATED_MAGNETOMETER: 20,
+    BNO_REPORT_ARVR_STABILIZED_ROTATION_VECTOR: 10,
+    BNO_REPORT_ARVR_STABILIZED_GAME_ROTATION_VECTOR: 10,
+    BNO_REPORT_GYRO_INTEGRATED_ROTATION_VECTOR: 10,
+}
 
 _Q_POINT_14_SCALAR = 2 ** (14 * -1)
 _Q_POINT_12_SCALAR = 2 ** (12 * -1)
@@ -141,17 +195,26 @@ _REPORT_LENGTHS = {
 _RAW_REPORTS = {
     BNO_REPORT_RAW_ACCELEROMETER: BNO_REPORT_ACCELEROMETER,
     BNO_REPORT_RAW_GYROSCOPE: BNO_REPORT_GYROSCOPE,
+    BNO_REPORT_UNCALIBRATED_GYROSCOPE: BNO_REPORT_GYROSCOPE,  # For testing
     BNO_REPORT_RAW_MAGNETOMETER: BNO_REPORT_MAGNETOMETER,
+    BNO_REPORT_UNCALIBRATED_MAGNETOMETER: BNO_REPORT_MAGNETOMETER,  # For testing
 }
+
+# Available sensor reports
 _AVAIL_SENSOR_REPORTS = {
     BNO_REPORT_ACCELEROMETER: (_Q_POINT_8_SCALAR, 3, 10),
-    BNO_REPORT_GRAVITY: (_Q_POINT_8_SCALAR, 3, 10),
     BNO_REPORT_GYROSCOPE: (_Q_POINT_9_SCALAR, 3, 10),
     BNO_REPORT_MAGNETOMETER: (_Q_POINT_4_SCALAR, 3, 10),
     BNO_REPORT_LINEAR_ACCELERATION: (_Q_POINT_8_SCALAR, 3, 10),
     BNO_REPORT_ROTATION_VECTOR: (_Q_POINT_14_SCALAR, 4, 14),
-    BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR: (_Q_POINT_12_SCALAR, 4, 14),
+    BNO_REPORT_GRAVITY: (_Q_POINT_8_SCALAR, 3, 10),
     BNO_REPORT_GAME_ROTATION_VECTOR: (_Q_POINT_14_SCALAR, 4, 12),
+    BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR: (_Q_POINT_12_SCALAR, 4, 14),
+    BNO_REPORT_PRESSURE: (1, 1, 8),
+    BNO_REPORT_AMBIENT_LIGHT: (1, 1, 8),
+    BNO_REPORT_HUMIDITY: (1, 1, 6),
+    BNO_REPORT_PROXIMITY: (1, 1, 6),
+    BNO_REPORT_TEMPERATURE: (1, 1, 6),
     BNO_REPORT_STEP_COUNTER: (1, 1, 12),
     BNO_REPORT_SHAKE_DETECTOR: (1, 1, 6),
     BNO_REPORT_STABILITY_CLASSIFIER: (1, 1, 6),
@@ -159,7 +222,13 @@ _AVAIL_SENSOR_REPORTS = {
     BNO_REPORT_RAW_ACCELEROMETER: (1, 3, 16),
     BNO_REPORT_RAW_GYROSCOPE: (1, 3, 16),
     BNO_REPORT_RAW_MAGNETOMETER: (1, 3, 16),
+    BNO_REPORT_UNCALIBRATED_GYROSCOPE: (_Q_POINT_9_SCALAR, 3, 10),  # For testing
+    BNO_REPORT_UNCALIBRATED_MAGNETOMETER: (_Q_POINT_4_SCALAR, 3, 10),  # For testing
+    BNO_REPORT_ARVR_STABILIZED_ROTATION_VECTOR: (_Q_POINT_14_SCALAR, 4, 12),  # For testing
+    BNO_REPORT_ARVR_STABILIZED_GAME_ROTATION_VECTOR: (_Q_POINT_14_SCALAR, 4, 12),  # For testing
+    BNO_REPORT_GYRO_INTEGRATED_ROTATION_VECTOR: (_Q_POINT_14_SCALAR, 4, 12),  # For testing
 }
+
 _INITIAL_REPORTS = {
     BNO_REPORT_ACTIVITY_CLASSIFIER: {
         "Tilting": -1,
@@ -215,7 +284,7 @@ def _elapsed_sec(start_time):
     
     Returns float in seconds
     """
-    return ticks_diff(ticks_ms(), start_time)/1000.0
+    return ticks_diff(ticks_ms(), start_time) / 1000.0
 
 
 ############ PACKET PARSING ###########################
@@ -368,7 +437,6 @@ def _insert_command_request_report(
 
 
 def _report_length(report_id: int) -> int:
-    print (f"DGB:BRC:_report_length: {hex(report_id)=}")
     if report_id < 0xF0:  # it's a sensor report
         return _AVAIL_SENSOR_REPORTS[report_id][2]
 
@@ -486,19 +554,19 @@ class Packet:
         return False
 
 
-# TODO BRC ***** make sure  # I2C address is declared in class : self._bno_add
 class BNO08X:
     """Library for the BNO08x IMUs from Hillcrest Laboratories
 
     :param
 
     """
-    def __init__(self, i2c_bus, address=None, reset_pin=None, debug = False) -> None:
+
+    def __init__(self, i2c_bus, address=None, reset_pin=None, debug=False) -> None:
         self._debug: bool = debug
         self._reset_pin = reset_pin
         self._dbg("********** __init__ *************")
         self._data_buffer: bytearray = bytearray(DATA_BUFFER_SIZE)
-        self._data_buffer_memoryview =memoryview(self._data_buffer)
+        self._data_buffer_memoryview = memoryview(self._data_buffer)
         self._command_buffer: bytearray = bytearray(12)
         self._packet_slices = []
 
@@ -512,11 +580,11 @@ class BNO08X:
         self._wait_for_initialize = True
         self._init_complete = False
         self._id_read = False
+        self._quaternion_euler_vector = BNO_REPORT_GAME_ROTATION_VECTOR  # default can change with set_quaternion_euler
         # for saving the most recent reading when decoding several packets
         self._readings = {}
         self.initialize()
         self._dbg("********** End __init__ *************")
-
 
     def initialize(self) -> None:
         """Initialize the sensor"""
@@ -524,7 +592,6 @@ class BNO08X:
             self.hard_reset()
             self.soft_reset()
             try:
-                print (">>>>> self._check_id() >>>")
                 if self._check_id():
                     return
             except Exception:
@@ -532,24 +599,24 @@ class BNO08X:
         else:
             raise RuntimeError("Could not read ID")
 
-#     def initialize(self):
-#         if self._reset_pin:
-#             self.hard_reset()
-#             reset_type = "hardware"
-#         else:
-#             self.soft_reset()
-#             reset_type = "software"
-# 
-#         for attempt in range(3):
-#             try:
-#                 if self._check_id():
-#                     self._dbg(f"{reset_type} reset successful")
-#                     return
-#             except OSError:
-#                 pass
-#             sleep_ms(600)
-# 
-#         raise RuntimeError(f"Failed to get valid ID after {reset_type} reset")
+    #     def initialize(self):
+    #         if self._reset_pin:
+    #             self.hard_reset()
+    #             reset_type = "hardware"
+    #         else:
+    #             self.soft_reset()
+    #             reset_type = "software"
+    #
+    #         for attempt in range(3):
+    #             try:
+    #                 if self._check_id():
+    #                     self._dbg(f"{reset_type} reset successful")
+    #                     return
+    #             except OSError:
+    #                 pass
+    #             sleep_ms(600)
+    #
+    #         raise RuntimeError(f"Failed to get valid ID after {reset_type} reset")
 
     @property
     def magnetic(self):
@@ -565,9 +632,37 @@ class BNO08X:
         """A quaternion representing the current rotation vector"""
         self._process_available_packets()
         try:
-            return self._readings[BNO_REPORT_ROTATION_VECTOR]
+            # TODO BRC understand
+            # return self._readings[BNO_REPORT_ROTATION_VECTOR]
+            return self._readings[self._quaternion_euler_vector]
         except KeyError:
             raise RuntimeError("No quaternion report found, is it enabled?") from None
+
+    @property
+    def euler(self):
+        # A 3-tuple representing the current Roll, Tilt, and Yaw euler angle in degree
+        self._process_available_packets()
+        try:
+            # q = self._readings[BNO_REPORT_ROTATION_VECTOR]
+            q = self._readings[self._quaternion_euler_vector]
+        except KeyError:
+            raise RuntimeError("No quaternion report found, is it enabled?") from None
+
+        jsqr = q[1] * q[1]
+        t0 = +2.0 * (q[3] * q[0] + q[1] * q[2])
+        t1 = +1.0 - 2.0 * (q[0] * q[0] + jsqr)
+        roll = degrees(atan2(t0, t1))
+
+        t2 = +2.0 * (q[3] * q[1] - q[2] * q[0])
+        t2 = +1.0 if t2 > +1.0 else t2
+        t2 = -1.0 if t2 < -1.0 else t2
+        tilt = degrees(asin(t2))
+
+        t3 = +2.0 * (q[3] * q[2] + q[0] * q[1])
+        t4 = +1.0 - 2.0 * (jsqr + q[2] * q[2])
+        yaw = degrees(atan2(t3, t4))
+
+        return roll, tilt, yaw
 
     @property
     def geomagnetic_quaternion(self):
@@ -807,7 +902,6 @@ class BNO08X:
         while self._data_ready:
             if max_packets and processed_count > max_packets:
                 return
-            # print("reading a packet")
             try:
                 new_packet = self._read_packet()
             except PacketError:
@@ -815,7 +909,6 @@ class BNO08X:
             self._handle_packet(new_packet)
             processed_count += 1
             self._dbg("")
-            # print("Processed", processed_count, "packets")
             self._dbg("")
         self._dbg("")
         self._dbg(" ** DONE! **")
@@ -864,14 +957,33 @@ class BNO08X:
         seq = new_packet.header.sequence_number
         self._sequence_number[channel] = seq
 
-    def _handle_packet(self, packet: Packet) -> None:
+    # Dobodu addressed: https://github.com/adafruit/Adafruit_CircuitPython_BNO08x/issues/49
+    # Dobodu debugged CircuitPython's issue with  RuntimeError: ('Unprocessable Batch bytes', 2)
+    def _handle_packet(self, packet):
         # split out reports first
+        self._dbg("HANDLING PACKET...")
         try:
-            _separate_batch(packet, self._packet_slices)
+            # get first report id, loop up its report length, read that many bytes, parse them
+            next_byte_index = 0
+            while next_byte_index < packet.header.data_length:
+                report_id = packet.data[next_byte_index]
+                if report_id < 0xF0:  # it's a sensor report
+                    required_bytes = _AVAIL_SENSOR_REPORTS[report_id][2]
+                else:
+                    required_bytes = _REPORT_LENGTHS[report_id]
+                unprocessed_byte_count = packet.header.data_length - next_byte_index
+                # handle incomplete remainder
+                if unprocessed_byte_count < required_bytes:
+                    self._dbg("Unprocessable Batch bytes : Skipping...", unprocessed_byte_count, "bytes")
+                    break
+                # we have enough bytes to read so add a slice to the list that was passed in
+                report_slice = packet.data[next_byte_index: next_byte_index + required_bytes]
+                self._packet_slices.append([report_slice[0], report_slice])
+                next_byte_index = next_byte_index + required_bytes
             while len(self._packet_slices) > 0:
                 self._process_report(*self._packet_slices.pop())
         except Exception as error:
-            print(packet)
+            self._dbg(packet)
             raise error
 
     def _handle_control_report(self, report_id: int, report_bytes: bytearray) -> None:
@@ -982,40 +1094,73 @@ class BNO08X:
 
         return set_feature_report
 
-    # TODO: add docs for available features
-    # TODO: I think this should call a function that imports all the bits for the given feature
-    # so we're not carrying around  stuff for extra features
-    def enable_feature(
-            self,
-            feature_id: int,
-            report_interval: int = _DEFAULT_REPORT_INTERVAL,
-    ) -> None:
-        """Used to enable a given feature of the BNO08x"""
-        self._dbg("\n********** Enabling feature id:", feature_id, "**********")
+    # Enable a given feature of the BNO08x (See Hillcrest 6.5.4)
+    def enable_feature(self, feature_id, freq=None):
+        self._dbg("ENABLING FEATURE ID...", feature_id)
 
+        set_feature_report = bytearray(17)
+        set_feature_report[0] = _SET_FEATURE_COMMAND
+        set_feature_report[1] = feature_id
+        if freq is not None:
+            AVAIL_REPORT_FREQ[feature_id] = freq
+        report_interval = int(1_000_000 / AVAIL_REPORT_FREQ[feature_id])  # delay in micro_s
+        pack_into("<I", set_feature_report, 5, report_interval)
         if feature_id == BNO_REPORT_ACTIVITY_CLASSIFIER:
-            set_feature_report = self._get_feature_enable_report(
-                feature_id, report_interval, _ENABLED_ACTIVITIES
-            )
-        else:
-            set_feature_report = self._get_feature_enable_report(feature_id, report_interval)
+            pack_into("<I", set_feature_report, 13, ENABLED_ACTIVITIES)
 
         feature_dependency = _RAW_REPORTS.get(feature_id, None)
         # if the feature was enabled it will have a key in the readings dict
         if feature_dependency and feature_dependency not in self._readings:
-            self._dbg("Enabling feature depencency:", feature_dependency)
+            self._dbg("\tEnabling feature depencency:", feature_dependency)
             self.enable_feature(feature_dependency)
 
-        self._dbg("Enabling", feature_id)
         self._send_packet(_BNO_CHANNEL_CONTROL, set_feature_report)
 
-        start_time = ticks_ms()  # 1
-
+        start_time = ticks_ms()
         while _elapsed_sec(start_time) < _FEATURE_ENABLE_TIMEOUT:
             self._process_available_packets(max_packets=10)
+            self._dbg("Feature IDs", self._readings)
             if feature_id in self._readings:
                 return
-        raise RuntimeError("Was not able to enable feature", feature_id)
+        raise RuntimeError("BNO08X_I2C : ENABLING FEATURE ID : Was not able to enable feature", feature_id)
+
+    def set_orientation(self, quaternion):
+        return  # Procedure to be completed and corrected
+        # set orientation of the system
+        self._dbg("DEVICE ORIENTATION SETTING UP...")
+        set_orientation = bytearray(17)
+        set_orientation[0] = FRS_WRITE_REQUEST
+        set_orientation[1] = 0,  # reserved
+        set_orientation[2] = 0,  # Length LSB
+        set_orientation[3] = BNO_CONF_SYSTEM_ORIENTATION & 0xFF,  # FRS Type LSB
+        set_orientation[4] = BNO_CONF_SYSTEM_ORIENTATION >> 80,  # FRS Type MSB
+
+        self._send_packet(BNO_CHANNEL_CONTROL, set_orientation)
+
+        set_orientation[0] = FRS_WRITE_DATA
+        set_orientation[1] = 0,  # reserved
+        set_orientation[2] = 0,  # Offset LSB
+        set_orientation[3] = 0,  # Offset MSB
+        set_orientation[4] = ORENT_QW & 0xFF,  # Data0 LSB
+        set_orientation[5] = ORENT_QW >> 8,  # Data0 MSB
+        set_orientation[6] = 0,  # Offset LSB
+        set_orientation[7] = 0,  # Offset MSB
+        set_orientation[8] = ORENT_QX & 0xFF,  # Data1 LSB
+        set_orientation[9] = ORENT_QX >> 8,  # Data1 MSB
+        set_orientation[10] = 0,  # Offset LSB
+        set_orientation[11] = 0,  # Offset MSB
+        set_orientation[12] = ORENT_QY & 0xFF,  # Data2 LSB
+        set_orientation[13] = ORENT_QY >> 8,  # Data2 MSB
+        set_orientation[14] = 0,  # Offset LSB
+        set_orientation[15] = 0,  # Offset MSB
+        set_orientation[16] = ORENT_QZ & 0xFF,  # Data2 LSB
+        set_orientation[17] = ORENT_QZ >> 8,  # Data2 MSB
+
+        self._send_packet(BNO_CHANNEL_CONTROL, set_orientation)
+
+    def set_quaternion_euler_vector(self, feature_id):
+        self._quaternion_euler_vector = feature_id
+        return
 
     def _check_id(self) -> bool:
         self._dbg("\n\t\t********** Check ID **********")

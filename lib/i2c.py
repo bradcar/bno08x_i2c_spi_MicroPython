@@ -19,9 +19,8 @@ from struct import pack_into
 from micropython import const
 
 from bno08x import BNO08X, Packet, DATA_BUFFER_SIZE
-from utime import sleep_ms
 
-#from bno08x import DATA_BUFFER_SIZE, Packet, PacketError
+# from bno08x import DATA_BUFFER_SIZE, Packet, PacketError
 #
 
 
@@ -32,13 +31,12 @@ class BNO08X_I2C(BNO08X):
     """Library for the BNO08x IMUs from CEVA & Hillcrest Laboratories
     """
 
-    def __init__(self, i2c_bus, address=_BNO08X_DEFAULT_ADDRESS, reset_pin=None,  debug=False):
+    def __init__(self, i2c_bus, address=_BNO08X_DEFAULT_ADDRESS, reset_pin=None, debug=False):
         self._i2c = i2c_bus
         self._bno_i2c_addr = address if address is not None else _BNO08X_DEFAULT_ADDRESS
-            
-        #give the parent constructor (BNO08X.__init__), the right values from BNO08X_I2C
-        super().__init__(i2c_bus, address, reset_pin, debug)
 
+        # give the parent constructor (BNO08X.__init__), the right values from BNO08X_I2C
+        super().__init__(i2c_bus, address, reset_pin, debug)
 
         # BRC
         # with self.bus_device_obj as i2c:
@@ -57,7 +55,7 @@ class BNO08X_I2C(BNO08X):
         packet = Packet(self._data_buffer)
         self._dbg("Sending packet:")
         self._dbg(packet)
-# BRC
+        # BRC
         self._i2c.writeto(self._bno_i2c_addr, self._data_buffer[:write_length])
 
         self._sequence_number[channel] = (self._sequence_number[channel] + 1) % 256
@@ -68,16 +66,16 @@ class BNO08X_I2C(BNO08X):
 
     def _read_header(self):
         """Reads the first 4 bytes available as a header"""
-# BRC
+        # BRC
         self._i2c.readfrom_into(self._bno_i2c_addr, self._data_buffer_memoryview[:4])
-        
+
         packet_header = Packet.header_from_buffer(self._data_buffer)
         self._dbg("_read_header")
         self._dbg(packet_header)
         return packet_header
 
     def _read_packet(self):
-# BRC
+        # BRC
         self._i2c.readfrom_into(self._bno_i2c_addr, self._data_buffer_memoryview[:4])
         self._dbg("")
 
@@ -120,7 +118,7 @@ class BNO08X_I2C(BNO08X):
                 "!!!!!!!!!!!! ALLOCATION: increased _data_buffer to bytearray(%d) !!!!!!!!!!!!! "
                 % total_read_length
             )
-# BRC
+        # BRC
         self._i2c.readfrom_into(self._bno_i2c_addr, self._data_buffer_memoryview[:total_read_length])
 
     @property
