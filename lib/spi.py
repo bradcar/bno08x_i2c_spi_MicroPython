@@ -7,38 +7,40 @@
 """
 Subclass of `BNO08X` to use SPI
 """
-from micropython import const
-
 from struct import pack_into
-from utime import ticks_ms, sleep_ms, ticks_diff
+
+from utime import ticks_ms, sleep_ms
 
 from bno08x import BNO08X, Packet, PacketError, DATA_BUFFER_SIZE, _elapsed_sec
+
 
 class BNO08X_SPI(BNO08X):
     """Library for the BNO08x IMUs on SPI
 
     Args:
-        spi_bus ([busio.SPI]): The SPI bus to use to communicate with the BNO08x
-        cs_pin ([digitalio.DigitalInOut]): The pin object to use for the SPI Chip Select
+        spi_bus, cspin, intpin, resetpin, baudrate=1_000_000, debug=False
+        spi_bus: The SPI bus used with BNO08x
+        cspin: CS pin to signal reads or writes
+        intpin: to know when BNO08x is ready
+        resetpin: to Reset BNO08x
+        baudrate: Maximum of 3 MHz, TODO wny does this defaults to 1_000_000
         debug (bool, optional): Enables print statements used for debugging. Defaults to False.
     """
 
     def __init__(self, spi_bus, cspin, intpin, resetpin, baudrate=1_000_000, debug=False):
-        self._spi = spi_device.SPIDevice(spi_bus, cspin, baudrate=baudrate, polarity=1, phase=1)
+        self._spi = spi_bus
+        self._cs = cspin
         self._int = intpin
+        self._reset = resetpin
         super().__init__(resetpin, debug)
 
     def hard_reset(self):
-        """Hardware reset the sensor to an initial unconfigured state"""
-        self._reset.direction = Direction.OUTPUT
-        self._int.direction = Direction.INPUT
-        self._int.pull = Pull.UP
 
         print("Hard resetting...")
         self._reset.value = True  # perform hardware reset
-        time.sleep(0.01)
+        sleep_ms(10)
         self._reset.value = False
-        time.sleep(0.01)
+        sleep_ms(10)
         self._reset.value = True
         self._wait_for_int()
         print("Done!")
@@ -67,24 +69,32 @@ class BNO08X_SPI(BNO08X):
             try:
                 _packet = self._read_packet()
             except PacketError:
-                time.sleep(0.1)
+                sleep_ms(100)
         # print("OK!")
         # all is good!
 
     def _read_into(self, buf, start=0, end=None):
         self._wait_for_int()
 
-        with self._spi as spi:
-            spi.readinto(buf, start=start, end=end, write_value=0x00)
+        # with self._spi as spi:
+        #     spi.readinto(buf, start=start, end=end, write_value=0x00)
         # print("SPI Read buffer (", end-start, "b )", [hex(i) for i in buf[start:end]])
+        if end is None:
+            end = len(buf)
+        self._cs.value(0)
+        self._spi.readinto(buf[start:end], 0x00)
+        self._cs.value(1)
 
     def _read_header(self):
         """Reads the first 4 bytes available as a header"""
         self._wait_for_int()
 
         # read header
-        with self._spi as spi:
-            spi.readinto(self._data_buffer, end=4, write_value=0x00)
+        # with self._spi as spi:
+        #     spi.readinto(self._data_buffer, end=4, write_value=0x00)
+        self._cs.value(0)
+        self._spi.readinto(self._data_buffer, 0x00, 4)
+        self._cs.value(1)
         self._dbg("")
         self._dbg("SHTP READ packet header: ", [hex(x) for x in self._data_buffer[0:4]])
 
@@ -115,6 +125,7 @@ class BNO08X_SPI(BNO08X):
 
         if halfpacket:
             raise PacketError("read partial packet")
+
         new_packet = Packet(self._data_buffer)
         if self._debug:
             print(new_packet)
@@ -130,8 +141,11 @@ class BNO08X_SPI(BNO08X):
             unread_bytes = total_read_length - DATA_BUFFER_SIZE
             total_read_length = DATA_BUFFER_SIZE
 
-        with self._spi as spi:
-            spi.readinto(self._data_buffer, end=total_read_length)
+        # with self._spi as spi:
+        #     spi.readinto(self._data_buffer, end=total_read_length)
+        self._cs.value(0)
+        self._spi.readinto(self._data_buffer[:total_read_length])
+        self._cs.value(1)
         return unread_bytes > 0
 
     def _send_packet(self, channel, data):
@@ -145,8 +159,12 @@ class BNO08X_SPI(BNO08X):
             self._data_buffer[4 + idx] = send_byte
 
         self._wait_for_int()
-        with self._spi as spi:
-            spi.write(self._data_buffer, end=write_length)
+        # with self._spi as spi:
+        #     spi.write(self._data_buffer, end=write_length)
+        self._cs.value(0)
+        self._spi.write(self._data_buffer[:write_length])
+        self._cs.value(1)
+
         self._dbg("Sending: ", [hex(x) for x in self._data_buffer[0:write_length]])
         self._sequence_number[channel] = (self._sequence_number[channel] + 1) % 256
         return self._sequence_number[channel]
