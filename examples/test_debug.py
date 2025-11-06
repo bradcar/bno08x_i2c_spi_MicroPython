@@ -19,8 +19,8 @@ print("====================================")
 bno = BNO08X_I2C(i2c0, address=0x4B, reset_pin=None, debug=False)
 
 bno.enable_feature(BNO_REPORT_ACCELEROMETER, 20)
-bno.enable_feature(BNO_REPORT_MAGNETOMETER,20 )
-bno.enable_feature(BNO_REPORT_GYROSCOPE,20 )
+bno.enable_feature(BNO_REPORT_MAGNETOMETER, 20)
+bno.enable_feature(BNO_REPORT_GYROSCOPE, 20)
 bno.enable_feature(BNO_REPORT_GAME_ROTATION_VECTOR, 10)
 bno.set_quaternion_euler_vector(BNO_REPORT_GAME_ROTATION_VECTOR)
 
