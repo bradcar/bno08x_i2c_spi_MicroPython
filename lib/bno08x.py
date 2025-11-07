@@ -599,7 +599,7 @@ class BNO08X:
     #             sleep_ms(600)
     #
     #         raise RuntimeError(f"Failed to get valid ID after {reset_type} reset")
-    
+
     ############ USER VISIBLE REPORT FUNCTIONS ###########################
     @property
     def magnetic(self):
@@ -877,7 +877,6 @@ class BNO08X:
             if self._dcd_saved_at > start_time:
                 return
         raise RuntimeError("Could not save calibration data")
-
 
     ############### private/helper methods ###############
     # # decorator?

@@ -9,7 +9,7 @@ Subclass of `BNO08X` to use SPI
 """
 from struct import pack_into
 
-from utime import ticks_ms, sleep_ms
+from utime import ticks_ms, sleep_ms, sleep_us
 
 from bno08x import BNO08X, Packet, PacketError, DATA_BUFFER_SIZE, _elapsed_sec
 
@@ -32,30 +32,41 @@ class BNO08X_SPI(BNO08X):
         self._cs = cspin
         self._int = intpin
         self._reset = resetpin
-        super().__init__(resetpin, debug)
+        self._data_buffer = bytearray(DATA_BUFFER_SIZE)
+        # ensure CS is de-asserted by default
+        try:
+            self._cs.value(1)
+        except AttributeError:
+            pass
+        super().__init__(i2c_bus=None, address=None, reset_pin=resetpin, int_pin=intpin, debug=debug)
+
 
     def hard_reset(self):
 
         print("Hard resetting...")
-        self._reset.value = True  # perform hardware reset
-        sleep_ms(10)
-        self._reset.value = False
-        sleep_ms(10)
-        self._reset.value = True
+        self._reset.value(1)
+        sleep_ms(15)
+        self._reset.value(0)
+        sleep_ms(15)
+        self._reset.value(1)
+        sleep_ms(300)
         self._wait_for_int()
-        print("Done!")
+        print("_wait_for_int() returned")
+        sleep_ms(50)
         self._read_packet()
 
     def _wait_for_int(self):
-        # print("Waiting for INT...", end="")
         start_time = ticks_ms()
         while _elapsed_sec(start_time) < 3.0:
-            if not self._int.value:
-                break
-        else:
-            self.hard_reset()
-            # raise RuntimeError("Could not wake up")
-        # print("OK")
+            # BNO08x INT line is active low
+            if self._int.value() == 0:
+                print("self._int.value() went active low")
+                return
+            # small sleep to avoid busy-looping
+            sleep_ms(1)
+
+        # timeout: device did not assert INT
+        raise RuntimeError("Timeout waiting for INT to go low")
 
     def soft_reset(self):
         """Reset the sensor to an initial unconfigured state"""
@@ -76,14 +87,18 @@ class BNO08X_SPI(BNO08X):
     def _read_into(self, buf, start=0, end=None):
         self._wait_for_int()
 
+        if end is None:
+            end = len(buf)
+        if end <= start:
+            return  # nothing to read or invalid range
         # with self._spi as spi:
         #     spi.readinto(buf, start=start, end=end, write_value=0x00)
         # print("SPI Read buffer (", end-start, "b )", [hex(i) for i in buf[start:end]])
-        if end is None:
-            end = len(buf)
         self._cs.value(0)
-        self._spi.readinto(buf[start:end], 0x00)
+        sleep_us(1)
+        self._spi.readinto(memoryview(buf)[start:end], 0x00)
         self._cs.value(1)
+        self._dbg(f"SPI read {end - start} bytes:", [hex(x) for x in buf[start:end]])
 
     def _read_header(self):
         """Reads the first 4 bytes available as a header"""
@@ -93,16 +108,17 @@ class BNO08X_SPI(BNO08X):
         # with self._spi as spi:
         #     spi.readinto(self._data_buffer, end=4, write_value=0x00)
         self._cs.value(0)
-        self._spi.readinto(self._data_buffer, 0x00, 4)
+        sleep_us(1)
+        self._spi.readinto(memoryview(self._data_buffer)[:4], 0x00)
         self._cs.value(1)
         self._dbg("")
-        self._dbg("SHTP READ packet header: ", [hex(x) for x in self._data_buffer[0:4]])
+        self._dbg("SHTP READ packet header: ", [hex(x) for x in self._data_buffer[:4]])
 
     def _read_packet(self):
         self._read_header()
         halfpacket = False
 
-        print([hex(x) for x in self._data_buffer[0:4]])
+        print("_read_packet", [hex(x) for x in self._data_buffer[0:4]])
         if self._data_buffer[1] & 0x80:
             halfpacket = True
         header = Packet.header_from_buffer(self._data_buffer)
@@ -121,6 +137,7 @@ class BNO08X_SPI(BNO08X):
 
         # re-read header bytes since this is going to be a new transaction
         self._read_into(self._data_buffer, start=0, end=packet_byte_count)
+
         # print("Packet: ", [hex(i) for i in self._data_buffer[0:packet_byte_count]])
 
         if halfpacket:
@@ -144,7 +161,8 @@ class BNO08X_SPI(BNO08X):
         # with self._spi as spi:
         #     spi.readinto(self._data_buffer, end=total_read_length)
         self._cs.value(0)
-        self._spi.readinto(self._data_buffer[:total_read_length])
+        sleep_us(1)
+        self._spi.readinto(memoryview(self._data_buffer)[0:total_read_length], 0x00)
         self._cs.value(1)
         return unread_bytes > 0
 
