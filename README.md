@@ -140,7 +140,7 @@ Unfortunately, the BNO080, BNO085, and BNO086 all use **_non-standard clock stre
 
 ## SPI Setup
 
-In order to use SPI on most sensor boards instead of I2C you must often have to add solder blobs. Sparkfun BNO086 and Adafruit BNO085 both require solder blobs to bridge PS0 and PS1 on the back side.
+In order to use SPI on most sensor boards instead of I2C you must often have to add solder blobs. Ceva specifies that PS0 and PS1 should be high, which means that on Sparkfun BNO086 and Adafruit BNO085 need solder blobs to bridge PS0 and PS1 on the back side.
 
     from machine import SPI, Pin
     from spi import BNO08X_SPI
