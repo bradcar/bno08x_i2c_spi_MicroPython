@@ -131,12 +131,12 @@ Before getting sensor results the reports must be enabled:
 Euler angles have a problem with Gimbal lock. This is where a loss of a degree of freedom occurs when two rotational axes align, which means certain orientations have multiple representations. There was a famous example of this on Apollo 11.
 Quaternions avoid this problem because they represent a rotation as a single axis and an angle, providing a unique representation for every possible orientation. 
 
-https://base.movella.com/s/article/Understanding-Gimbal-Lock-and-how-to-prevent-it?language=en_US
-https://en.wikipedia.org/wiki/Gimbal_lock
+- https://base.movella.com/s/article/Understanding-Gimbal-Lock-and-how-to-prevent-it?language=en_US
+- https://en.wikipedia.org/wiki/Gimbal_lock
 
 ## I2C Issues with speed and data quality
 
-Unfortunately, The BNO080, BNO085, and BNO086 all use **_non-standard clock stretching_** on the I2C. This can cause a variety of issues including report errors and the need to restart sensor. Clock stretching interferes with various chips (ex: RP2) in different ways. If you see sporadic results this may be part of the issue (BNO08X Datasheet 1000-3927 v1.17, page 15).
+Unfortunately, the BNO080, BNO085, and BNO086 all use **_non-standard clock stretching_** on the I2C. This can cause a variety of issues including report errors and the need to restart sensor. Clock stretching interferes with various chips (ex: RP2) in different ways. If you see sporadic results this may be part of the issue (BNO08X Datasheet 1000-3927 v1.17, page 15).
 
 ## SPI Setup
 
@@ -152,14 +152,18 @@ Unfortunately, The BNO080, BNO085, and BNO086 all use **_non-standard clock stre
 
     bno = BNO08X_SPI(spi, cs, int_pin, reset_pin, debug=False)
 
+## UART Setup
+
+UART has not been implemented.
+
 ## References
 
 The CEVA BNO085 and BNO086 9-axis sensors are made by Ceva (https://www.ceva-ip.com). They are based on Bosch hardware but use Hillcrest Labs’ proprietary sensor fusion software. BNO086 is backwards compatible with BNO085 and both are pin-for-pin replacements for Bosch Sensortec’s discontinued BNO055 and BMF055 sensors.
 
-https://www.ceva-ip.com/wp-content/uploads/BNO080_085-Product-Brief.pdf
+- https://www.ceva-ip.com/wp-content/uploads/BNO080_085-Product-Brief.pdf
 
-https://www.ceva-ip.com/wp-content/uploads/BNO080_085-Datasheet.pdf
+- https://www.ceva-ip.com/wp-content/uploads/BNO080_085-Datasheet.pdf
 
-https://cdn.sparkfun.com/assets/4/d/9/3/8/SH-2-Reference-Manual-v1.2.pdf
+- https://cdn.sparkfun.com/assets/4/d/9/3/8/SH-2-Reference-Manual-v1.2.pdf
 
 Bosch has a new 6-axis IMU BHI385 (announced June 2025) that can be paired with BMM350 3-axis Geomagnetic sensor.
