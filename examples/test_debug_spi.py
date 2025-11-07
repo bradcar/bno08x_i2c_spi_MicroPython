@@ -8,20 +8,21 @@ from bno08x import BNO_REPORT_GYROSCOPE, BNO_REPORT_GAME_ROTATION_VECTOR, BNO_RE
 from machine import SPI, Pin
 from spi import BNO08X_SPI
 
-reset_pin = Pin(16, Pin.OUT)  # Reset, tells BNO (INT) to reset
-int_pin = Pin(17, Pin.IN, Pin.PULL_UP)  # Interrupt, BNO (RST) signals when ready
-# sck = Pin(18, Pin.OUT)   # sck for SPI
-# spi1_TX = Pin(19, Pin.OUT)  # spi1_TX (MOSI) - connected to BNO SI (PICO)
-# spi1_RX = Pin(20, Pin.IN)  # spi1_RX, RES (MISO) - connected to BNO SO (POCI)
-cs = Pin(21, Pin.OUT)  # cs for SPI
+int_pin = Pin(14, Pin.IN, Pin.PULL_UP)  # Interrupt, BNO (RST) signals when ready
+reset_pin = Pin(15, Pin.OUT, value=1)  # Reset, tells BNO (INT) to reset
 
-spi = SPI(1, sck=Pin(18), mosi=Pin(19), miso=Pin(20), baudrate=3_000_000, polarity=0, phase=0)
+# spi1_RX = Pin(16, Pin.IN)  # spi1_RX, RES (MISO) - connected to BNO SO (POCI)
+cs = Pin(17, Pin.OUT, value=1)  # cs for SPI
+# sck = Pin(18, Pin.OUT, value=0)  # sck for SPI
+# spi1_TX = Pin(19, Pin.OUT, value=0)  # spi1_TX (MOSI) - connected to BNO SI (PICO)
+
+spi = SPI(0, sck=Pin(18), mosi=Pin(19), miso=Pin(16), baudrate=1_000_000)
 
 print("Start")
 print(spi)
 print("====================================")
 
-bno = BNO08X_SPI(spi, cs, int_pin, reset_pin, debug=False)
+bno = BNO08X_SPI(spi, cs, int_pin, reset_pin, debug=True)
 
 bno.enable_feature(BNO_REPORT_ACCELEROMETER, 20)
 bno.enable_feature(BNO_REPORT_MAGNETOMETER, 20)
