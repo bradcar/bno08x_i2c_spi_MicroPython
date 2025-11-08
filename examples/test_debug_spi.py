@@ -4,31 +4,32 @@
 from time import sleep
 
 from bno08x import BNO_REPORT_GYROSCOPE, BNO_REPORT_GAME_ROTATION_VECTOR, BNO_REPORT_MAGNETOMETER, \
-    BNO_REPORT_ACCELEROMETER
+    BNO_REPORT_ACCELEROMETER, BNO_REPORT_ROTATION_VECTOR
 from machine import SPI, Pin
 from spi import BNO08X_SPI
 
-int_pin = Pin(14, Pin.IN, Pin.PULL_UP)  # Interrupt, BNO (RST) signals when ready
-reset_pin = Pin(15, Pin.OUT, value=1)  # Reset, tells BNO (INT) to reset
+int_pin = Pin(14, Pin.IN, Pin.PULL_UP)  # Interrupt, enables BNO to signal when ready
+reset_pin = Pin(15, Pin.OUT, value=1)  # Reset to signal BNO to reset
 
 # spi1_RX = Pin(16, Pin.IN)  # spi1_RX, RES (MISO) - connected to BNO SO (POCI)
 cs = Pin(17, Pin.OUT, value=1)  # cs for SPI
 # sck = Pin(18, Pin.OUT, value=0)  # sck for SPI
 # spi1_TX = Pin(19, Pin.OUT, value=0)  # spi1_TX (MOSI) - connected to BNO SI (PICO)
+wake_pin = Pin(20, Pin.OUT, value=1)  # Wakes BNO to enable INT response
 
 spi = SPI(0, sck=Pin(18), mosi=Pin(19), miso=Pin(16), baudrate=1_000_000)
 
 print("Start")
-bno = BNO08X_SPI(spi, cs, reset_pin, int_pin, debug=True)
-
+bno = BNO08X_SPI(spi, cs, reset_pin, int_pin, wake_pin, debug=True)
 print(spi)  # polarity=1, phase=1 for bno08x
-print("====================================")
+print("====================================\n")
 
-bno.enable_feature(BNO_REPORT_ACCELEROMETER, 20)
-bno.enable_feature(BNO_REPORT_MAGNETOMETER, 20)
-bno.enable_feature(BNO_REPORT_GYROSCOPE, 20)
+bno.enable_feature(BNO_REPORT_ROTATION_VECTOR, 10)
 bno.enable_feature(BNO_REPORT_GAME_ROTATION_VECTOR, 10)
 bno.set_quaternion_euler_vector(BNO_REPORT_GAME_ROTATION_VECTOR)
+bno.enable_feature(BNO_REPORT_MAGNETOMETER, 20)
+bno.enable_feature(BNO_REPORT_ACCELEROMETER, 20)
+bno.enable_feature(BNO_REPORT_GYROSCOPE, 20)
 print("BNO08x sensors enabled\n")
 
 cpt = 0
