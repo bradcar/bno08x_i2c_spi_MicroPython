@@ -32,7 +32,7 @@ class BNO08X_I2C(BNO08X):
         self._bno_i2c_addr = address if address is not None else _BNO08X_DEFAULT_ADDRESS
 
         # give the parent constructor (BNO08X.__init__), the right values from BNO08X_I2C
-        super().__init__(i2c_bus, address, reset_pin, int_pin, debug)
+        super().__init__(reset_pin=reset_pin, int_pin=int_pin, cs_pin=None, wake_pin=None, debug=debug)
 
         # BRC
         # with self.bus_device_obj as i2c:
