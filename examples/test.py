@@ -25,17 +25,8 @@ bno = BNO08X_SPI(spi, cs, reset_pin, int_pin, wake_pin, debug=True)
 print(spi)  # polarity=1, phase=1 for bno08x
 print("====================================\n")
 
-# bno.enable_feature(BNO_REPORT_ROTATION_VECTOR, 10)
-# bno.enable_feature(BNO_REPORT_GAME_ROTATION_VECTOR, 10)
-# bno.set_quaternion_euler_vector(BNO_REPORT_GAME_ROTATION_VECTOR)
-# bno.enable_feature(BNO_REPORT_MAGNETOMETER, 20)
 bno.enable_feature(BNO_REPORT_ACCELEROMETER, 20)
-# bno.enable_feature(BNO_REPORT_GYROSCOPE, 20)
 print("BNO08x sensors enabled\n")
-
-calibration_status = bno.calibration_status
-print(f"Mag Calibration: \"{REPORT_ACCURACY_STATUS[calibration_status]}\" = {calibration_status}")
-
 
 cpt = 0
 
@@ -43,15 +34,8 @@ while True:
     sleep(0.5)
     cpt += 1
 
-    print("{cpt=}")
+    print(f"{cpt=}")
     accel_x, accel_y, accel_z = bno.acceleration
     print(f"Acceleration  X: {accel_x:+.3f}  Y: {accel_y:+.3f}  Z: {accel_z:+.3f}  m/s²")
-    gyro_x, gyro_y, gyro_z = bno.gyro
-    print(f"Gyroscope     X: {gyro_x:+.3f}  Y: {gyro_y:+.3f}  Z: {gyro_z:+.3f}  rads/s")
-    mag_x, mag_y, mag_z = bno.magnetic
-    print(f"Magnetometer  X: {mag_x:+.3f}  Y: {mag_y:+.3f}  Z: {mag_z:+.3f}  uT")
-    quat_i, quat_j, quat_k, quat_real = bno.quaternion
-    print(f"Rot Vect Quat I: {quat_i:+.3f}  J: {quat_j:+.3f}  K: {quat_k:+.3f}  Real: {quat_real:+.3f}")
-    roll, tilt, yaw = bno.euler
-    print(f"Euler Angle   R: {roll:+.3f}  T: {tilt:+.3f}  Y: {yaw:+.3f}")
-    print()
+
+
