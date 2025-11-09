@@ -165,7 +165,7 @@ _REPORTS_DICTIONARY = {
     0xF1: "COMMAND_RESPONSE",
     0xF2: "COMMAND_REQUEST",
     0xF3: "FRS_READ_RESPONSE",
-    0xF4: "",
+    0xF4: "FRS_READ_REQUEST",
     0xF5: "FRS_WRITE_RESPONSE",
     0xF6: "FRS_WRITE_DATA",
     0xF7: "FRS_WRITE_REQUEST",
@@ -303,7 +303,7 @@ _INITIAL_REPORTS = {
     BNO_REPORT_ROTATION_VECTOR: (0.0, 0.0, 0.0, 0.0),
     BNO_REPORT_GAME_ROTATION_VECTOR: (0.0, 0.0, 0.0, 0.0),
     BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR: (0.0, 0.0, 0.0, 0.0),
-    # Gyro is a 5 tuple, celsius float and int timestamp for last two entry
+    # Gyro is a 5 tuple, Celsius float and int timestamp for last two entry
     BNO_REPORT_RAW_GYROSCOPE: (0, 0, 0, 0.0, 0),
     # Acc & Mag are 4-tuple, int timestamp for last entry
     BNO_REPORT_RAW_ACCELEROMETER: (0, 0, 0, 0),
@@ -311,8 +311,7 @@ _INITIAL_REPORTS = {
     BNO_REPORT_STEP_COUNTER: 0,
 }
 
-# TODO BRC enabling all activities seems like overkill
-_ENABLED_ACTIVITIES = 0x1FF  # All activities; 1 bit set for each of 8 activities, + Unknown
+_ENABLED_ACTIVITIES = 0x1FF  # for ACTIVITY_CLASSIFIER enable 9  activities: 1 bit set for each of 8 activities and 1 Unknown
 
 DATA_BUFFER_SIZE = const(512)  # data buffer size. obviously eats ram
 PacketHeader = namedtuple(
@@ -335,7 +334,6 @@ REPORT_ACCURACY_STATUS = [
 
 class PacketError(Exception):
     """Raised when the packet could not be parsed"""
-
     pass
 
 
@@ -433,7 +431,17 @@ def _parse_shake_report(report_bytes: bytearray) -> bool:
     return (shake_bitfield & 0x07) > 0
 
 
-def parse_sensor_id(buffer: bytearray) -> tuple[int, ...]:
+def _parse_timestamp(buffer: bytearray) -> tuple[int, ...]:
+    """Parse the timestamp unit is 100usec tics
+        return usecs
+    """
+    if not (buffer[0] == _BASE_TIMESTAMP or buffer[0] == _TIMESTAMP_REBASE):
+        raise AttributeError(f"Wrong report id Timestamp Base or Rebase: {hex(buffer[0])}")
+
+    return unpack_from("<I", buffer, 1)[0] * 100
+
+
+def _parse_sensor_id(buffer: bytearray) -> tuple[int, ...]:
     """Parse the fields of a product id report"""
     if not buffer[0] == _SHTP_REPORT_PRODUCT_ID_RESPONSE:
         raise AttributeError("Wrong report id for sensor id: %s" % hex(buffer[0]))
@@ -536,16 +544,17 @@ class Packet:
             else:
                 outstr += "DBG::\t\t \t** UNKNOWN Report Type **: %s\n" % hex(self.report_id)
 
-            if self.report_id > 0xF0 and len(self.data) >= 6 and self.data[5] in reports:
-                outstr += "DBG::\t\t \tSensor Report Type: %s(%s)\n" % (
-                    reports[self.data[5]],
-                    hex(self.data[5]),
-                )
+            # TODO BRC this is not correct for 0xfb
+            #             if self.report_id > 0xF0 and len(self.data) >= 6 and self.data[5] in reports:
+            #                 outstr += "DBG::\t\t \tSensor Report Type: %s(%s)\n" % (
+            #                     reports[self.data[5]],
+            #                     hex(self.data[5]),
+            #                 )
 
             if self.report_id == 0xFC and len(self.data) >= 6 and self.data[1] in reports:
                 outstr += "DBG::\t\t \tEnabled Feature: %s(%s)\n" % (
                     reports[self.data[1]],
-                    hex(self.data[5]),
+                    hex(self.data[1]),
                 )
         outstr += "DBG::\t\t Sequence number: %s\n" % self.header.sequence_number
         outstr += "\n"
@@ -613,6 +622,8 @@ class BNO08X:
         self._data_buffer_memoryview = memoryview(self._data_buffer)
         self._command_buffer: bytearray = bytearray(12)
         self._packet_slices = []
+        self._timestamp_us = 0
+        self._rebase_us = 0
 
         # TODO: this is wrong there should be one per channel per direction
         self._sequence_number: list[int] = [0, 0, 0, 0, 0, 0]
@@ -625,8 +636,8 @@ class BNO08X:
         self._init_complete = False
         self._id_read = False
         self._quaternion_euler_vector = BNO_REPORT_GAME_ROTATION_VECTOR  # default can change with set_quaternion_euler
-        # for saving the most recent reading when decoding several packets
-        self._readings = {}
+        # dictionary of most recent values from each sensor report
+        self._report_values = {}
         self.initialize()
         self._dbg("********** End __init__ *************\n")
 
@@ -657,7 +668,7 @@ class BNO08X:
         """A tuple of the current magnetic field measurements on the X, Y, and Z axes"""
         self._process_available_packets()  # decorator?
         try:
-            return self._readings[BNO_REPORT_MAGNETOMETER]
+            return self._report_values[BNO_REPORT_MAGNETOMETER]
         except KeyError:
             raise RuntimeError("No Magnetometer report found, is it enabled?") from None
 
@@ -667,8 +678,7 @@ class BNO08X:
         self._process_available_packets()
         try:
             # TODO BRC understand
-            # return self._readings[BNO_REPORT_ROTATION_VECTOR]
-            return self._readings[self._quaternion_euler_vector]
+            return self._report_values[self._quaternion_euler_vector]
         except KeyError:
             raise RuntimeError("No quaternion report found, is it enabled?") from None
 
@@ -677,8 +687,7 @@ class BNO08X:
         # A 3-tuple representing the current Roll, Tilt, and Yaw euler angle in degree
         self._process_available_packets()
         try:
-            # q = self._readings[BNO_REPORT_ROTATION_VECTOR]
-            q = self._readings[self._quaternion_euler_vector]
+            q = self._report_values[self._quaternion_euler_vector]
         except KeyError:
             raise RuntimeError("No quaternion report found, is it enabled?") from None
 
@@ -703,7 +712,7 @@ class BNO08X:
         """A quaternion representing the current geomagnetic rotation vector"""
         self._process_available_packets()
         try:
-            return self._readings[BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR]
+            return self._report_values[BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR]
         except KeyError:
             raise RuntimeError("No geomagnetic quaternion report found, is it enabled?") from None
 
@@ -715,7 +724,7 @@ class BNO08X:
         corrected using the magnetometer. Some drift is expected"""
         self._process_available_packets()
         try:
-            return self._readings[BNO_REPORT_GAME_ROTATION_VECTOR]
+            return self._report_values[BNO_REPORT_GAME_ROTATION_VECTOR]
         except KeyError:
             raise RuntimeError("No game quaternion report found, is it enabled?") from None
 
@@ -724,7 +733,7 @@ class BNO08X:
         """The number of steps detected since the sensor was initialized"""
         self._process_available_packets()
         try:
-            return self._readings[BNO_REPORT_STEP_COUNTER]
+            return self._report_values[BNO_REPORT_STEP_COUNTER]
         except KeyError:
             raise RuntimeError("No steps report found, is it enabled?") from None
 
@@ -734,7 +743,7 @@ class BNO08X:
         axes in meters per second squared"""
         self._process_available_packets()
         try:
-            return self._readings[BNO_REPORT_LINEAR_ACCELERATION]
+            return self._report_values[BNO_REPORT_LINEAR_ACCELERATION]
         except KeyError:
             raise RuntimeError("No linear acceleration report found, is it enabled?") from None
 
@@ -744,7 +753,7 @@ class BNO08X:
         axes in meters per second squared"""
         self._process_available_packets()
         try:
-            return self._readings[BNO_REPORT_ACCELEROMETER]
+            return self._report_values[BNO_REPORT_ACCELEROMETER]
         except KeyError:
             raise RuntimeError("No acceleration report found, is it enabled?") from None
 
@@ -754,7 +763,7 @@ class BNO08X:
         axes in meters per second squared"""
         self._process_available_packets()
         try:
-            return self._readings[BNO_REPORT_GRAVITY]
+            return self._report_values[BNO_REPORT_GRAVITY]
         except KeyError:
             raise RuntimeError("No gravity report found, is it enabled?") from None
 
@@ -764,7 +773,7 @@ class BNO08X:
         axes in radians per second"""
         self._process_available_packets()
         try:
-            return self._readings[BNO_REPORT_GYROSCOPE]
+            return self._report_values[BNO_REPORT_GYROSCOPE]
         except KeyError:
             raise RuntimeError("No gyroscope report found, is it enabled?") from None
 
@@ -778,10 +787,10 @@ class BNO08X:
         """
         self._process_available_packets()
         try:
-            shake_detected = self._readings[BNO_REPORT_SHAKE_DETECTOR]
+            shake_detected = self._report_values[BNO_REPORT_SHAKE_DETECTOR]
             # clear on read
             if shake_detected:
-                self._readings[BNO_REPORT_SHAKE_DETECTOR] = False
+                self._report_values[BNO_REPORT_SHAKE_DETECTOR] = False
             return shake_detected
         except KeyError:
             raise RuntimeError("No shake report found, is it enabled?") from None
@@ -801,7 +810,7 @@ class BNO08X:
         """
         self._process_available_packets()
         try:
-            stability_classification = self._readings[BNO_REPORT_STABILITY_CLASSIFIER]
+            stability_classification = self._report_values[BNO_REPORT_STABILITY_CLASSIFIER]
             return stability_classification
         except KeyError:
             raise RuntimeError("No stability classification report found, is it enabled?") from None
@@ -824,7 +833,7 @@ class BNO08X:
         """
         self._process_available_packets()
         try:
-            activity_classification = self._readings[BNO_REPORT_ACTIVITY_CLASSIFIER]
+            activity_classification = self._report_values[BNO_REPORT_ACTIVITY_CLASSIFIER]
             return activity_classification
         except KeyError:
             raise RuntimeError("No activity classification report found, is it enabled?") from None
@@ -834,7 +843,7 @@ class BNO08X:
         """Returns the sensor's raw, unscaled value from the accelerometer registers"""
         self._process_available_packets()
         try:
-            raw_acceleration = self._readings[BNO_REPORT_RAW_ACCELEROMETER]
+            raw_acceleration = self._report_values[BNO_REPORT_RAW_ACCELEROMETER]
             return raw_acceleration
         except KeyError:
             raise RuntimeError("No raw acceleration report found, is it enabled?") from None
@@ -844,7 +853,7 @@ class BNO08X:
         """Returns the sensor's raw, unscaled value from the gyro registers"""
         self._process_available_packets()
         try:
-            raw_gyro = self._readings[BNO_REPORT_RAW_GYROSCOPE]
+            raw_gyro = self._report_values[BNO_REPORT_RAW_GYROSCOPE]
             return raw_gyro
         except KeyError:
             raise RuntimeError("No raw gyroscope report found, is it enabled?") from None
@@ -854,7 +863,7 @@ class BNO08X:
         """Returns the sensor's raw, unscaled value from the magnetometer registers"""
         self._process_available_packets()
         try:
-            raw_magnetic = self._readings[BNO_REPORT_RAW_MAGNETOMETER]
+            raw_magnetic = self._report_values[BNO_REPORT_RAW_MAGNETOMETER]
             return raw_magnetic
         except KeyError:
             raise RuntimeError("No raw magnetic report found, is it enabled?") from None
@@ -918,7 +927,7 @@ class BNO08X:
         local_buffer = bytearray(12)
         _insert_command_request_report(
             _SAVE_DCD,
-            local_buffer,  # should use self._data_buffer :\ but send_packet don't
+            local_buffer,  # should use self._data_buffer :\ but send_packet doesn't
             self._get_report_seq_id(_COMMAND_REQUEST),
         )
         self._send_packet(_BNO_CHANNEL_CONTROL, local_buffer)
@@ -1050,15 +1059,28 @@ class BNO08X:
             raise
 
     def _handle_control_report(self, report_id: int, report_bytes: bytearray) -> None:
+        """
+        Handle control reports. Want timestamps to return quickly
+        :param report_id: report ID
+        :param report_bytes: portion of packet for report
+        :return:
+        """
+        # Base Timestamp (0xfb)
+        if report_id == _BASE_TIMESTAMP:
+            self._timestamp_us = _parse_timestamp(report_bytes)
+            self._dbg(f"Base Timestamp (0xfb): {self._timestamp_us} usec")
+            return
+
+        # Timestamp Rebase (0xfa)
+        if report_id == _TIMESTAMP_REBASE:
+            self._rebase_us = _parse_timestamp(report_bytes)
+            self._dbg(f"Timestamp Rebase (0xfa): {self._rebase_us} usec")
+            return
+
+        # Product ID Response (0xf8)
         if report_id == _SHTP_REPORT_PRODUCT_ID_RESPONSE:
-            (
-                reset_cause,
-                sw_part_number,
-                sw_major,
-                sw_minor,
-                sw_patch,
-                sw_build_number,
-            ) = parse_sensor_id(report_bytes)
+            (reset_cause, sw_part_number, sw_major, sw_minor, sw_patch, sw_build_number,) = _parse_sensor_id(
+                report_bytes)
             self._dbg("Product ID Response (0xf8):")
             self._dbg(f"*** Last reset cause: {reset_cause} = {_RESET_CAUSE_STRING[reset_cause]}")
             self._dbg(f"*** Part Number: {sw_part_number}")
@@ -1067,25 +1089,22 @@ class BNO08X:
             self._dbg("")
             self._id_read = True
 
+        # Feature response (0xfc)
+        # feature_report_id, feature_flags, change_sensitivity, report_interval
+        # batch_interval_word, sensor_specific_configuration_word
         if report_id == _GET_FEATURE_RESPONSE:
             get_feature_report = _parse_get_feature_response_report(report_bytes)
             _report_id, feature_report_id, *_remainder = get_feature_report
-            self._readings[feature_report_id] = _INITIAL_REPORTS.get(
-                feature_report_id, (0.0, 0.0, 0.0)
-            )
+            self._report_values[feature_report_id] = _INITIAL_REPORTS.get(feature_report_id, (0.0, 0.0, 0.0))
+
+        # Command Response (0xF1)
         if report_id == _COMMAND_RESPONSE:
             self._handle_command_response(report_bytes)
 
     def _handle_command_response(self, report_bytes: bytearray) -> None:
         (report_body, response_values) = _parse_command_response(report_bytes)
 
-        (
-            _report_id,
-            _seq_number,
-            command,
-            _command_seq_number,
-            _response_seq_number,
-        ) = report_body
+        (_report_id, _seq_number, command, _command_seq_number, _response_seq_number,) = report_body
 
         # status, accel_en, gyro_en, mag_en, planar_en, table_en, *_reserved) = response_values
         command_status, *_rest = response_values
@@ -1102,7 +1121,7 @@ class BNO08X:
     def _process_report(self, report_id: int, report_bytes: bytearray) -> None:
         """
         Process reports
-        Extract accuracy and delay from each report
+        Extract accuracy and delay from each report (100usec ticks)
         TODO: BRC determine how to expose accuracy and delay to users
         """
         if report_id >= 0xF0:
@@ -1120,32 +1139,32 @@ class BNO08X:
             self._dbg("")
 
         if report_id == BNO_REPORT_STEP_COUNTER:
-            self._readings[report_id] = _parse_step_counter_report(report_bytes)
+            self._report_values[report_id] = _parse_step_counter_report(report_bytes)
             return
 
         if report_id == BNO_REPORT_SHAKE_DETECTOR:
             shake_detected = _parse_shake_report(report_bytes)
             # shake not previously detected - auto cleared by 'shake' property
             try:
-                if not self._readings[BNO_REPORT_SHAKE_DETECTOR]:
-                    self._readings[BNO_REPORT_SHAKE_DETECTOR] = shake_detected
+                if not self._report_values[BNO_REPORT_SHAKE_DETECTOR]:
+                    self._report_values[BNO_REPORT_SHAKE_DETECTOR] = shake_detected
             except KeyError:
                 pass
             return
 
         if report_id == BNO_REPORT_STABILITY_CLASSIFIER:
             stability_classification = _parse_stability_classifier_report(report_bytes)
-            self._readings[BNO_REPORT_STABILITY_CLASSIFIER] = stability_classification
+            self._report_values[BNO_REPORT_STABILITY_CLASSIFIER] = stability_classification
             return
 
         if report_id == BNO_REPORT_ACTIVITY_CLASSIFIER:
             activity_classification = _parse_activity_classifier_report(report_bytes)
-            self._readings[BNO_REPORT_ACTIVITY_CLASSIFIER] = activity_classification
+            self._report_values[BNO_REPORT_ACTIVITY_CLASSIFIER] = activity_classification
             return
 
         # sensor_data is a tuple
         sensor_data, accuracy, delay_us = _parse_sensor_report_data(report_bytes)
-        self._dbg(f"Report: {reports[report_id]}, {sensor_data=}, {accuracy=}, {delay_us=}")
+        self._dbg(f"Report: {reports[report_id]}, {sensor_data=}, {accuracy=}, {delay_us=} usec")
         # TODO: BRC only magnetic accuracy can be user visible, but all reports have accuracy
         if report_id == BNO_REPORT_MAGNETOMETER:
             self._magnetometer_accuracy = accuracy
@@ -1153,7 +1172,7 @@ class BNO08X:
         # TODO: FIXME; Sensor reports are batched in a LIFO which means that multiple reports
         # for the same type will end with the oldest/last being kept and the other
         # newer reports thrown away
-        self._readings[report_id] = sensor_data
+        self._report_values[report_id] = sensor_data
 
     # TODO: Make this a Packet creation
     @staticmethod
@@ -1185,7 +1204,7 @@ class BNO08X:
             pack_into("<I", set_feature_report, 13, _ENABLED_ACTIVITIES)
 
         feature_dependency = _RAW_REPORTS.get(feature_id, None)
-        if feature_dependency and feature_dependency not in self._readings:
+        if feature_dependency and feature_dependency not in self._report_values:
             self._dbg("\tEnabling feature dependency:", feature_dependency)
             self.enable_feature(feature_dependency)
 
@@ -1211,15 +1230,15 @@ class BNO08X:
                 self._dbg("Got a packet via aggressive non-blocking read.")
 
                 # Add to dictionary of feature and values placeholder, default(0.0, 0.0, 0.0)
-                self._readings[feature_id] = _INITIAL_REPORTS.get(feature_id, (0.0, 0.0, 0.0))
+                self._report_values[feature_id] = _INITIAL_REPORTS.get(feature_id, (0.0, 0.0, 0.0))
                 self._handle_packet(new_packet)
 
             except PacketError:
                 pass
 
-            if feature_id in self._readings:
+            if feature_id in self._report_values:
                 self._dbg(f"Feature ID {feature_id} enabled: {_REPORTS_DICTIONARY[feature_id]}")
-                self._dbg(f"Feature Dictionary={self._readings}")
+                self._dbg(f"Feature Dictionary={self._report_values}")
                 return
 
             sleep_ms(5)  # polling delay
@@ -1296,31 +1315,6 @@ class BNO08X:
 
         raise RuntimeError("_check_id: Timeout waiting for valid Product ID response")
 
-    def _parse_sensor_id(self):
-        """
-        TODO BRC is this function used anymore ???
-        :return:
-        """
-        print(f"_parse_sensor_id waiting for 0xf8,{hex(self._data_buffer[4])=}")
-        if not self._data_buffer[4] == _SHTP_REPORT_PRODUCT_ID_RESPONSE:
-            return None
-
-        reset_cause = self._get_data(1, "<B")
-        sw_major = self._get_data(2, "<B")
-        sw_minor = self._get_data(3, "<B")
-        sw_part_number = self._get_data(4, "<I")
-        sw_build_number = self._get_data(8, "<I")
-        sw_patch = self._get_data(12, "<H")
-
-        self._dbg(f"Product ID Response ({hex(self._data_buffer[4])=}):")
-        self._dbg(f"Last reset cause: {reset_cause} = {_RESET_CAUSE_STRING[reset_cause]}")
-        self._dbg(f"*** Part Number: {sw_part_number}")
-        self._dbg(f"*** Software Version: {sw_major}.{sw_minor}.{sw_patch}")
-
-        self._dbg("")
-        # TODO: returns only one of the numbers! do we need to return anything?
-        return sw_part_number
-
     def _dbg(self, *args, **kwargs) -> None:
         if self._debug:
             print("DBG::\t\t", *args, **kwargs)
@@ -1346,7 +1340,7 @@ class BNO08X:
         sleep_ms(10)
         self._reset_pin.value(1)
         sleep_ms(200)  # orig was 10ms, datasheet implies 94 ms required
-        self._dbg("*** Hard Reset End")
+        self._dbg("*** Hard Reset End, awaiting Acknowledgement")
 
     def soft_reset(self) -> None:
         """Reset the sensor to an initial unconfigured state"""
@@ -1365,7 +1359,7 @@ class BNO08X:
             except PacketError:
                 sleep_ms(500)
 
-        self._dbg("End Soft RESET")
+        self._dbg("End Soft RESET, awaiting Acknowledgement")
 
     def _send_packet(self, channel, data):
         raise RuntimeError("_send_packet Not implemented in bno08x.py, supplanted by I2C or SPI subclass")
