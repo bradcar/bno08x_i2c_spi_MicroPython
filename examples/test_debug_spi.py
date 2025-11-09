@@ -5,7 +5,7 @@ from time import sleep
 from utime import sleep_ms
 
 from bno08x import BNO_REPORT_GYROSCOPE, BNO_REPORT_GAME_ROTATION_VECTOR, BNO_REPORT_MAGNETOMETER, \
-    BNO_REPORT_ACCELEROMETER, BNO_REPORT_ROTATION_VECTOR
+    BNO_REPORT_ACCELEROMETER, BNO_REPORT_ROTATION_VECTOR, REPORT_ACCURACY_STATUS
 from machine import SPI, Pin
 from spi import BNO08X_SPI
 
@@ -21,7 +21,7 @@ wake_pin = Pin(20, Pin.OUT, value=1)  # Wakes BNO to enable INT response
 spi = SPI(0, sck=Pin(18), mosi=Pin(19), miso=Pin(16), baudrate=1_000_000)
 
 print("Start")
-bno = BNO08X_SPI(spi, cs, reset_pin, int_pin, wake_pin, debug=True)
+bno = BNO08X_SPI(spi, cs, reset_pin, int_pin, wake_pin, debug=False)
 print(spi)  # polarity=1, phase=1 for bno08x
 print("====================================\n")
 
@@ -40,7 +40,7 @@ print(f"Mag Calibration: \"{REPORT_ACCURACY_STATUS[calibration_status]}\" = {cal
 cpt = 0
 
 while True:
-    sleep(0.5)
+    sleep(0.1)
     cpt += 1
 
     print("{cpt=}")

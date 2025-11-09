@@ -21,7 +21,7 @@ wake_pin = Pin(20, Pin.OUT, value=1)  # Wakes BNO to enable INT response
 spi = SPI(0, sck=Pin(18), mosi=Pin(19), miso=Pin(16), baudrate=1_000_000)
 
 print("Start")
-bno = BNO08X_SPI(spi, cs, reset_pin, int_pin, wake_pin, debug=True)
+bno = BNO08X_SPI(spi, cs, reset_pin, int_pin, wake_pin, debug=False)
 print(spi)  # polarity=1, phase=1 for bno08x
 print("====================================\n")
 
@@ -31,10 +31,7 @@ print("BNO08x sensors enabled\n")
 cpt = 0
 
 while True:
-    sleep(0.5)
     cpt += 1
-
-    print(f"{cpt=}")
     accel_x, accel_y, accel_z = bno.acceleration
     print(f"Acceleration  X: {accel_x:+.3f}  Y: {accel_y:+.3f}  Z: {accel_z:+.3f}  m/s²")
 
