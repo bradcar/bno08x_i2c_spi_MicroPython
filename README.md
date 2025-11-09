@@ -140,8 +140,14 @@ Unfortunately, the BNO080, BNO085, and BNO086 all use **_non-standard clock stre
 
 ## SPI Setup
 
-In order to use SPI on most sensor boards instead of I2C you must often have to add ONE solder blob on PS1. PS1 is left open so one can connect WAKE to driver.
-Ceva specifies that PS0 and PS1 should be high for SPI, but PS0 is driven high., which means that on Sparkfun BNO086 and Adafruit BNO085 need solder blobs to bridge PS0 and PS1 on the back side.
+In order to use SPI on most sensor boards instead of I2C you must often have to add ONE solder blob on PS1. 
+On the back side of Sparkfun BNO086 and Adafruit BNO085 one needs as older blob to bridge PS1.
+PS0 must be connected to a GPIO so that the SPI's WAKE functionality can be performed.
+Ceva specifies that PS0 and PS1 during SPI operation, but PS0 is set low and then high in driver to wake bno08x.
+
+
+
+
 
     from machine import SPI, Pin
     from spi import BNO08X_SPI
