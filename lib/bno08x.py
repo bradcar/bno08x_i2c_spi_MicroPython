@@ -626,6 +626,10 @@ class BNO08X:
         self._rebase_us = 0
 
         # TODO: this is wrong there should be one per channel per direction
+        # This is true — the SHTP spec requires independent sequence counters for:
+        # Fix: Replace with:
+        # self._sequence_numbers = {ch: {"tx": 0, "rx": 0} for ch in range(6)}
+        # then update: _get_report_seq_id() and _update_sequence_number()
         self._sequence_number: list[int] = [0, 0, 0, 0, 0, 0]
         self._two_ended_sequence_numbers: dict[int, int] = {}
         self._dcd_saved_at: float = -1
@@ -948,20 +952,46 @@ class BNO08X:
 
     ############### private/helper methods ###############
     # # decorator?
-    def _process_available_packets(self, max_packets=None) -> None:
+    # def _process_available_packets(self, max_packets=None) -> None:
+    #     processed_count = 0
+    #     while self._data_ready:
+    #         if max_packets and processed_count > max_packets:
+    #             return
+    #         try:
+    #             new_packet = self._read_packet()
+    #         except PacketError:
+    #             continue
+    #         self._handle_packet(new_packet)
+    #         processed_count += 1
+    #         self._dbg("")
+    #     self._dbg("")
+    #     self._dbg(" _process_available_packets  DONE! ")
+
+    def _process_available_packets(self, max_packets: int = 10) -> None:
+        """Read and handle up to `max_packets` packets while data-ready is active."""
         processed_count = 0
-        while self._data_ready:
-            if max_packets and processed_count > max_packets:
-                return
+        start_time = ticks_ms()
+
+        while self._data_ready and processed_count < max_packets:
             try:
                 new_packet = self._read_packet()
             except PacketError:
+                # transient read errors should not block
+                self._dbg("PacketError in _process_available_packets")
+                # small delay prevents hammering SPI if line is unstable
+                sleep_ms(2)
                 continue
-            self._handle_packet(new_packet)
-            processed_count += 1
-            self._dbg("")
-        self._dbg("")
-        self._dbg(" _process_available_packets  DONE! ")
+
+            if new_packet:
+                self._handle_packet(new_packet)
+                processed_count += 1
+
+            # safety timeout (e.g., stuck DRDY line)
+            if ticks_diff(ticks_ms(), start_time) > 50:
+                self._dbg("Timeout in _process_available_packets")
+                break
+
+        self._dbg(f"_process_available_packets done, {processed_count} packets processed")
 
     def _wait_for_packet_type(self, channel, timeout=3.0):
         """

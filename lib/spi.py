@@ -179,7 +179,7 @@ class BNO08X_SPI(BNO08X):
 
         self._sequence_number[channel_number] = sequence_number
 
-        # This check is redundant if the non-blocking logic worked, kept for robustness
+        # Redundant check if the non-blocking logic worked, kept for robustness
         if packet_byte_count == 0:
             raise PacketError("No packet available")
 
