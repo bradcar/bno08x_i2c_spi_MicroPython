@@ -29,7 +29,7 @@ class BNO08X_SPI(BNO08X):
     Args:
         spi_bus: SPI bus object
         cs_pin: SPI CS pin to signal reads or writes
-        reset_pin: optionl reset to BNO08x
+        reset_pin: optional reset to BNO08x
         int_pin=None: optional int_pin to get signal when BNO08x is ready
         baudrate: (default 1 MHz, max 3 MHz)
         debug: Enables optional logging prints used for debugging driver
@@ -209,10 +209,10 @@ class BNO08X_SPI(BNO08X):
                 raise PacketError("No packet available")
             raise
 
-        halfpacket = False
+        partial_packet = False
 
         if self._data_buffer[1] & 0x80:
-            halfpacket = True
+            partial_packet = True
 
         header = Packet.header_from_buffer(self._data_buffer)
         packet_byte_count = header.packet_byte_count
@@ -234,7 +234,7 @@ class BNO08X_SPI(BNO08X):
         self._read_into(self._data_buffer, start=0, end=packet_byte_count)
         # print("Packet: ", [hex(i) for i in self._data_buffer[0:packet_byte_count]])
 
-        if halfpacket:
+        if partial_packet:
             raise PacketError("read partial packet")
 
         new_packet = Packet(self._data_buffer)
