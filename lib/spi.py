@@ -15,6 +15,13 @@ The INT pin is primarily used to tell the host when the BNO08x has data ready (f
 Requiring an active-low INT signal before the host sends a command (a Write) is overly strict.
 The BNO08x documentation indicates that for a host-to-BNO write, the host is usually free to
 initiate the transfer.
+
+TODO: The BNO08x datasheet says the host must respond to H_INTN assertion within ≈10ms
+to avoid starvation. While the 3.0s timeout prevents lockup, the sleep_ms(10) in
+the loop means the driver will frequently miss the 10ms deadline when polling.
+For high report rates, should a hardware interrupt on the Pico's INT pin?
+(machine.Pin.irq()) on the INT pin.
+On falling edge interrups, set a flag (ex: self._int_data_ready = True)?
 """
 from struct import pack_into
 
@@ -55,6 +62,8 @@ class BNO08X_SPI(BNO08X):
 
         super().__init__(reset_pin=reset_pin, int_pin=int_pin, cs_pin=cs_pin, wake_pin=wake_pin, debug=debug)
 
+    # TODO test soft_reset in base class
+    # TODO should hard_reset be in base class?
     def hard_reset(self):
         self._dbg("*** Hard Reset start...")
         self._reset.value(1)
@@ -99,18 +108,11 @@ class BNO08X_SPI(BNO08X):
             if self._debug and ticks_ms() % 500 < 5:  # Log every ~0.5 seconds
                 self._dbg(f"INT value still high (1) at T={_elapsed_sec(start_time):.3f}s")
 
-            sleep_ms(10)
+            sleep_us(100) # TODO How long?
 
         self._dbg(f"Timeout (3.0s) reached. INT pin state: {self._int.value()}")
         raise RuntimeError("Timeout waiting for INT to go low")
 
-    def soft_reset(self):
-        """Reset the sensor to an initial unconfigured state"""
-        for _i in range(3):
-            try:
-                _packet = self._read_packet()
-            except PacketError:
-                sleep_ms(100)
 
     def _read_into(self, buf, start=0, end=None):
 
@@ -147,7 +149,7 @@ class BNO08X_SPI(BNO08X):
             packet_len = self._data_buffer[0] | (self._data_buffer[1] << 8)
 
             if packet_len == 0xFFFF or packet_len == 0:
-                self._dbg("Non-blocking read FAILED despite INT being low. Header length: {hex(packet_len)}")
+                self._dbg(f"Non-blocking read FAILED despite INT being low. Header length: {hex(packet_len)}")
                 raise PacketError("No valid packet received despite INT being low")
 
             self._dbg(f"Non-blocking read SUCCESS. Header length: {packet_len}. Pin state: {self._int.value()}")
@@ -199,20 +201,6 @@ class BNO08X_SPI(BNO08X):
         self._update_sequence_number(new_packet)
         return new_packet
 
-    def _read(self, requested_read_length):
-        self._dbg("trying to read", requested_read_length, "bytes")
-        unread_bytes = 0
-        # +4 for the header
-        total_read_length = requested_read_length + 4
-        if total_read_length > DATA_BUFFER_SIZE:
-            unread_bytes = total_read_length - DATA_BUFFER_SIZE
-            total_read_length = DATA_BUFFER_SIZE
-
-        self._cs.value(0)
-        sleep_us(1)
-        self._spi.readinto(memoryview(self._data_buffer)[0:total_read_length], 0x00)
-        self._cs.value(1)
-        return unread_bytes > 0
 
     def _send_packet(self, channel, data):
         data_length = len(data)
@@ -235,7 +223,6 @@ class BNO08X_SPI(BNO08X):
     @property
     def _data_ready(self):
         try:
-            # REMOVED: self._wait_for_int()
             return self._int.value() == 0
         except AttributeError:
             # Handle case where _int is None or hasn't been initialized
