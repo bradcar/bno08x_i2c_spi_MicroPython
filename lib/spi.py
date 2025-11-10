@@ -122,7 +122,7 @@ class BNO08X_SPI(BNO08X):
             return
 
         self._cs.value(0)
-        sleep_us(1)
+#         sleep_us(1)
         self._spi.readinto(memoryview(buf)[start:end], 0x00)
         self._cs.value(1)
         # self._dbg(f"SPI read {end - start} bytes:", [hex(x) for x in buf[start:end]])
@@ -141,7 +141,7 @@ class BNO08X_SPI(BNO08X):
             self._dbg("Not waiting for INT. Pin is LOW (0). Proceeding to read...")
 
         self._cs.value(0)
-        sleep_us(1)
+#         sleep_us(1)
         self._spi.readinto(memoryview(self._data_buffer)[:4], 0x00)
         self._cs.value(1)
 
@@ -215,7 +215,6 @@ class BNO08X_SPI(BNO08X):
         self._spi.write(self._data_buffer[:write_length])
         self._cs.value(1)
 
-        self._dbg("Sending: ", [hex(x) for x in self._data_buffer[0:write_length]])
         self._sequence_number[channel] = (self._sequence_number[channel] + 1) % 256
         return self._sequence_number[channel]
 
