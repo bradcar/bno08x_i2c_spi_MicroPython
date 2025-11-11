@@ -311,7 +311,9 @@ _INITIAL_REPORTS = {
     BNO_REPORT_STEP_COUNTER: 0,
 }
 
-_ENABLED_ACTIVITIES = 0x1FF  # for ACTIVITY_CLASSIFIER enable 9  activities: 1 bit set for each of 8 activities and 1 Unknown
+# Activity classifier Initialization
+ACTIVITIES = ["Unknown", "In-Vehicle", "On-Bicycle", "On-Foot", "Still", "Tilting", "Walking", "Running", "OnStairs", ]
+_ENABLED_ACTIVITIES = 0x1FF  # Enable 9  activities: 1 bit set for each of 8 activities and 1 Unknown
 
 DATA_BUFFER_SIZE = const(512)  # data buffer size. obviously eats ram
 PacketHeader = namedtuple(
@@ -383,52 +385,11 @@ def _report_length(report_id: int) -> int:
     return _REPORT_LENGTHS[report_id]
 
 
-def _parse_step_counter_report(report_bytes: bytearray) -> int:
-    return unpack_from("<H", report_bytes, 8)[0]
-
-
-def _parse_stability_classifier_report(report_bytes: bytearray) -> str:
-    classification_bitfield = unpack_from("<B", report_bytes, 4)[0]
-    return ["Unknown", "On Table", "Stationary", "Stable", "In motion"][classification_bitfield]
-
-
 # Set Feature Command (0xfd) - host to sensor in SH-2 (6.5.4)
 # report_id (B), feature_report_id(B), feature_flags (B), change_sensitivity(H),
 # report_interval (I), batch_interval_word (I), sensor_specific_configuration_word (I)
 def _parse_get_feature_response_report(report_bytes: bytearray):
     return unpack_from("<BBBHIII", report_bytes)
-
-
-# Personal Activity Classifier (0x1E), in SH-2 (6.5.36)
-def _parse_activity_classifier_report(report_bytes: bytearray) -> dict[str, str]:
-    activities = [
-        "Unknown",
-        "In-Vehicle",
-        "On-Bicycle",
-        "On-Foot",
-        "Still",
-        "Tilting",
-        "Walking",
-        "Running",
-        "OnStairs",
-    ]
-
-    end_and_page_number = unpack_from("<B", report_bytes, 4)[0]
-    page_number = end_and_page_number & 0x7F
-    most_likely = unpack_from("<B", report_bytes, 5)[0]
-    confidences = unpack_from("<BBBBBBBBB", report_bytes, 6)
-
-    classification = {"most_likely": activities[most_likely]}
-    for idx, raw_confidence in enumerate(confidences):
-        confidence = (10 * page_number) + raw_confidence
-        activity_string = activities[idx]
-        classification[activity_string] = confidence
-    return classification
-
-
-def _parse_shake_report(report_bytes: bytearray) -> bool:
-    shake_bitfield = unpack_from("<H", report_bytes, 4)[0]
-    return (shake_bitfield & 0x07) > 0
 
 
 def _parse_timestamp(buffer: bytearray) -> tuple[int, ...]:
@@ -639,7 +600,7 @@ class BNO08X:
         self._init_complete = False
         self._id_read = False
         self._quaternion_euler_vector = BNO_REPORT_GAME_ROTATION_VECTOR  # default can change with set_quaternion_euler
-        # dictionary of most recent values from each sensor report
+        # dictionary of most recent values from each enabled sensor report
         self._report_values = {}
         self._report_periods_dictionary_us = {}
         self.initialize()
@@ -674,7 +635,7 @@ class BNO08X:
         try:
             return self._report_values[BNO_REPORT_MAGNETOMETER]
         except KeyError:
-            raise RuntimeError("No Magnetometer report found, is it enabled?") from None
+            raise RuntimeError("Magnetometer report not enabled, use enable_feature") from None
 
     @property
     def quaternion(self):
@@ -684,7 +645,7 @@ class BNO08X:
             # TODO BRC understand
             return self._report_values[self._quaternion_euler_vector]
         except KeyError:
-            raise RuntimeError("No quaternion report found, is it enabled?") from None
+            raise RuntimeError("quaternion report not enabled, use enable_feature") from None
 
     @property
     def euler(self):
@@ -693,7 +654,7 @@ class BNO08X:
         try:
             q = self._report_values[self._quaternion_euler_vector]
         except KeyError:
-            raise RuntimeError("No quaternion report found, is it enabled?") from None
+            raise RuntimeError("quaternion report not enabled, use enable_feature") from None
 
         jsqr = q[1] * q[1]
         t0 = +2.0 * (q[3] * q[0] + q[1] * q[2])
@@ -718,7 +679,7 @@ class BNO08X:
         try:
             return self._report_values[BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR]
         except KeyError:
-            raise RuntimeError("No geomagnetic quaternion report found, is it enabled?") from None
+            raise RuntimeError("geomagnetic quaternion report not enabled, use enable_feature") from None
 
     @property
     def game_quaternion(self):
@@ -730,7 +691,7 @@ class BNO08X:
         try:
             return self._report_values[BNO_REPORT_GAME_ROTATION_VECTOR]
         except KeyError:
-            raise RuntimeError("No game quaternion report found, is it enabled?") from None
+            raise RuntimeError("game quaternion report not enabled, use enable_feature") from None
 
     @property
     def steps(self):
@@ -739,7 +700,7 @@ class BNO08X:
         try:
             return self._report_values[BNO_REPORT_STEP_COUNTER]
         except KeyError:
-            raise RuntimeError("No steps report found, is it enabled?") from None
+            raise RuntimeError("steps report not enabled, use enable_feature") from None
 
     @property
     def linear_acceleration(self):
@@ -749,7 +710,7 @@ class BNO08X:
         try:
             return self._report_values[BNO_REPORT_LINEAR_ACCELERATION]
         except KeyError:
-            raise RuntimeError("No linear acceleration report found, is it enabled?") from None
+            raise RuntimeError("linear acceleration report not enabled, use enable_feature") from None
 
     @property
     def acceleration(self):
@@ -757,7 +718,7 @@ class BNO08X:
         try:
             return self._report_values[BNO_REPORT_ACCELEROMETER]
         except KeyError:
-            raise RuntimeError("No acceleration report found, is it enabled?")
+            raise RuntimeError("acceleration report not enabled, use enable_feature") from None
 
     @property
     def gravity(self):
@@ -767,7 +728,7 @@ class BNO08X:
         try:
             return self._report_values[BNO_REPORT_GRAVITY]
         except KeyError:
-            raise RuntimeError("No gravity report found, is it enabled?") from None
+            raise RuntimeError("gravity report not enabled, use enable_feature") from None
 
     @property
     def gyro(self):
@@ -777,7 +738,7 @@ class BNO08X:
         try:
             return self._report_values[BNO_REPORT_GYROSCOPE]
         except KeyError:
-            raise RuntimeError("No gyroscope report found, is it enabled?") from None
+            raise RuntimeError("gyroscope report not enabled, use enable_feature") from None
 
     @property
     def shake(self):
@@ -795,7 +756,7 @@ class BNO08X:
                 self._report_values[BNO_REPORT_SHAKE_DETECTOR] = False
             return shake_detected
         except KeyError:
-            raise RuntimeError("No shake report found, is it enabled?") from None
+            raise RuntimeError("shake report not enabled, use enable_feature") from None
 
     @property
     def stability_classification(self):
@@ -815,7 +776,7 @@ class BNO08X:
             stability_classification = self._report_values[BNO_REPORT_STABILITY_CLASSIFIER]
             return stability_classification
         except KeyError:
-            raise RuntimeError("No stability classification report found, is it enabled?") from None
+            raise RuntimeError("stability classification report not enabled, use enable_feature") from None
 
     @property
     def activity_classification(self):
@@ -838,7 +799,7 @@ class BNO08X:
             activity_classification = self._report_values[BNO_REPORT_ACTIVITY_CLASSIFIER]
             return activity_classification
         except KeyError:
-            raise RuntimeError("No activity classification report found, is it enabled?") from None
+            raise RuntimeError("activity classification report not enabled, use enable_feature") from None
 
     @property
     def raw_acceleration(self):
@@ -848,7 +809,7 @@ class BNO08X:
             raw_acceleration = self._report_values[BNO_REPORT_RAW_ACCELEROMETER]
             return raw_acceleration
         except KeyError:
-            raise RuntimeError("No raw acceleration report found, is it enabled?") from None
+            raise RuntimeError("raw acceleration report not enabled, use enable_feature") from None
 
     @property
     def raw_gyro(self):
@@ -858,7 +819,7 @@ class BNO08X:
             raw_gyro = self._report_values[BNO_REPORT_RAW_GYROSCOPE]
             return raw_gyro
         except KeyError:
-            raise RuntimeError("No raw gyroscope report found, is it enabled?") from None
+            raise RuntimeError("raw gyroscope report not enabled, use enable_feature") from None
 
     @property
     def raw_magnetic(self):
@@ -868,7 +829,7 @@ class BNO08X:
             raw_magnetic = self._report_values[BNO_REPORT_RAW_MAGNETOMETER]
             return raw_magnetic
         except KeyError:
-            raise RuntimeError("No raw magnetic report found, is it enabled?") from None
+            raise RuntimeError("raw magnetic report not enabled, use enable_feature") from None
 
     def begin_calibration(self) -> None:
         """Begin the sensor's self-calibration routine"""
@@ -1135,22 +1096,14 @@ class BNO08X:
     def _process_report(self, report_id: int, report_bytes: bytearray) -> None:
         """
         Process reports both sensor and control reports
-        Extract accuracy and delay from each report (100usec ticks)
+        Extracted accuracy and delay from each report (100usec ticks)
         TODO: BRC determine how to expose accuracy and delay to users
         """
         if report_id >= 0xF0:
             self._handle_control_report(report_id, report_bytes)
             return
         self._dbg(f"_process_report: {reports[report_id]}")
-        #         if self._debug:
-        #             outstr = ""
-        #             for idx, packet_byte in enumerate(report_bytes):
-        #                 packet_index = idx
-        #                 if (packet_index % 4) == 0:
-        #                     outstr += f"\nDBG::\t\t[0x{packet_index:02X}] "
-        #                 outstr += f"0x{packet_byte:02X} "
-        #             self._dbg(outstr)
-        #             self._dbg("")
+
         if self._debug:
             lines = []
             for i in range(0, len(report_bytes), 4):
@@ -1160,26 +1113,39 @@ class BNO08X:
             self._dbg("")
 
         if report_id == BNO_REPORT_STEP_COUNTER:
-            self._report_values[report_id] = _parse_step_counter_report(report_bytes)
+            self._report_values[report_id] = unpack_from("<H", report_bytes, 8)[0]
             return
 
         if report_id == BNO_REPORT_SHAKE_DETECTOR:
-            shake_detected = _parse_shake_report(report_bytes)
-            # shake not previously detected - auto cleared by 'shake' property
-            try:
-                if not self._report_values[BNO_REPORT_SHAKE_DETECTOR]:
-                    self._report_values[BNO_REPORT_SHAKE_DETECTOR] = shake_detected
-            except KeyError:
-                pass
+            # 16-bit shake bitfield, Mask for X, Y, Z axes (0x07)
+            shake_bitfield = unpack_from("<H", report_bytes, 4)[0]
+            shake_detected = (shake_bitfield & 0x07) != 0
+
+            # Latch shake in _readings
+            if shake_detected:
+                previous = self._report_values.get(BNO_REPORT_SHAKE_DETECTOR, False)
+                self._report_values[BNO_REPORT_SHAKE_DETECTOR] = True
             return
 
         if report_id == BNO_REPORT_STABILITY_CLASSIFIER:
-            stability_classification = _parse_stability_classifier_report(report_bytes)
+            classification_bitfield = unpack_from("<B", report_bytes, 4)[0]
+            stability_classification = ["Unknown", "On Table", "Stationary", "Stable", "In motion"][
+                classification_bitfield]
             self._report_values[BNO_REPORT_STABILITY_CLASSIFIER] = stability_classification
             return
 
+        # Activitity Classifier in SH-2 (6.5.36)
         if report_id == BNO_REPORT_ACTIVITY_CLASSIFIER:
-            activity_classification = _parse_activity_classifier_report(report_bytes)
+            # 0 Report ID = 0x1E, # 1 Sequence number, # 2 Status, 3 Delay, 4 Page Number + EOS
+            # 5 Most likely state, # 6-15 Classification (10 x Page Number) + confidence
+            end_and_page_number, most_likely = unpack_from("<BB", report_bytes, 4)
+            page_number = end_and_page_number & 0x7F
+            confidences = unpack_from("<BBBBBBBBB", report_bytes, 6)
+            activity_classification = {"most_likely": ACTIVITIES[most_likely]}
+            for idx, raw_confidence in enumerate(confidences):
+                confidence = (10 * page_number) + raw_confidence
+                activity_string = ACTIVITIES[idx]
+                activity_classification[activity_string] = confidence
             self._report_values[BNO_REPORT_ACTIVITY_CLASSIFIER] = activity_classification
             return
 
@@ -1341,7 +1307,7 @@ class BNO08X:
         print(f"Enabled Report Periods:")
         for feature_id in self._report_periods_dictionary_us.keys():
             period_ms = self.report_period_us(feature_id) / 1000.0
-            print(f"\t{feature_id}: {_REPORTS_DICTIONARY[feature_id]}, {period_ms:.1f} ms, {1_000 / period_ms:.1f} Hz")
+            print(f"\t{feature_id}: {_REPORTS_DICTIONARY[feature_id]},\t{period_ms:.1f} ms, {1_000 / period_ms:.1f} Hz")
 
     def set_orientation(self, quaternion):
         return  # Procedure to be completed and corrected
