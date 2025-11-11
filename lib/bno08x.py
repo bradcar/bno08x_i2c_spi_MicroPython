@@ -36,7 +36,6 @@ TODO: BRC update RAW_Sensors
 # Calibrated Acceleration (m/s2)
 # Euler Angles (in degrees?)
 # CALIBRATION
-# RAW ACCEL, MAG, GYRO # Sfe says each needs the non-raw enabled to work
 """
 
 __version__ = "0.1"
@@ -47,11 +46,12 @@ from struct import pack_into, unpack_from
 
 from collections import namedtuple
 from micropython import const
-from utime import ticks_ms, ticks_diff, sleep_ms, sleep_us
+from utime import ticks_ms, ticks_diff, sleep_ms
 
 # import support files
 from debug import channels, reports
 
+# Commands
 BNO_CHANNEL_SHTP_COMMAND = const(0)
 BNO_CHANNEL_EXE = const(1)
 _BNO_CHANNEL_CONTROL = const(2)
@@ -178,7 +178,7 @@ _REPORTS_DICTIONARY = {
     0xFE: "GET_FEATURE_REQUEST",
 }
 
-_DEFAULT_REPORT_INTERVAL = const(50000)  # in microseconds = 50ms
+_DEFAULT_REPORT_INTERVAL = const(50000)  # in microseconds = 50ms, 20 MHz
 _QUAT_READ_TIMEOUT = 0.500  # timeout in seconds
 _PACKET_READ_TIMEOUT = 2.000  # timeout in seconds
 _FEATURE_ENABLE_TIMEOUT = 2.0  # timeout in seconds
@@ -394,7 +394,7 @@ def _parse_stability_classifier_report(report_bytes: bytearray) -> str:
 
 # Set Feature Command (0xfd) - host to sensor in SH-2 (6.5.4)
 # report_id (B), feature_report_id(B), feature_flags (B), change_sensitivity(H),
-# report_interval (I), batch_interval_word (I), sensor_specific_configuration_word  (I),
+# report_interval (I), batch_interval_word (I), sensor_specific_configuration_word (I)
 def _parse_get_feature_response_report(report_bytes: bytearray):
     return unpack_from("<BBBHIII", report_bytes)
 
@@ -437,7 +437,6 @@ def _parse_timestamp(buffer: bytearray) -> tuple[int, ...]:
     """
     if not (buffer[0] == _BASE_TIMESTAMP or buffer[0] == _TIMESTAMP_REBASE):
         raise AttributeError(f"Wrong report id Timestamp Base or Rebase: {hex(buffer[0])}")
-
     return unpack_from("<I", buffer, 1)[0] * 100
 
 
@@ -642,6 +641,7 @@ class BNO08X:
         self._quaternion_euler_vector = BNO_REPORT_GAME_ROTATION_VECTOR  # default can change with set_quaternion_euler
         # dictionary of most recent values from each sensor report
         self._report_values = {}
+        self._report_periods_dictionary_us = {}
         self.initialize()
         self._dbg("********** End __init__ *************\n")
 
@@ -670,7 +670,7 @@ class BNO08X:
     @property
     def magnetic(self):
         """A tuple of the current magnetic field measurements on the X, Y, and Z axes"""
-        self._process_available_packets()  # decorator?
+        self._process_available_packets()
         try:
             return self._report_values[BNO_REPORT_MAGNETOMETER]
         except KeyError:
@@ -751,19 +751,9 @@ class BNO08X:
         except KeyError:
             raise RuntimeError("No linear acceleration report found, is it enabled?") from None
 
-#     @property
-#     def acceleration(self):
-#         """A tuple representing the acceleration measurements on the X, Y, and Z
-#         axes in meters per second squared"""
-#         self._process_available_packets()
-#         try:
-#             return self._report_values[BNO_REPORT_ACCELEROMETER]
-#         except KeyError:
-#             raise RuntimeError("No acceleration report found, is it enabled?") from None
-
     @property
     def acceleration(self):
-        self._process_available_packets()  # consume any packets waiting
+        self._process_available_packets()
         try:
             return self._report_values[BNO_REPORT_ACCELEROMETER]
         except KeyError:
@@ -951,24 +941,13 @@ class BNO08X:
         raise RuntimeError("Could not save calibration data")
 
     ############### private/helper methods ###############
-    # # decorator?
-    # def _process_available_packets(self, max_packets=None) -> None:
-    #     processed_count = 0
-    #     while self._data_ready:
-    #         if max_packets and processed_count > max_packets:
-    #             return
-    #         try:
-    #             new_packet = self._read_packet()
-    #         except PacketError:
-    #             continue
-    #         self._handle_packet(new_packet)
-    #         processed_count += 1
-    #         self._dbg("")
-    #     self._dbg("")
-    #     self._dbg(" _process_available_packets  DONE! ")
 
     def _process_available_packets(self, max_packets: int = 10) -> None:
-        """Read and handle up to `max_packets` packets while data-ready is active."""
+        """
+            Read and handle up to `max_packets` packets while data-ready is active.
+            
+        Returns: True - if processed_count > 0
+        """
         processed_count = 0
         start_time = ticks_ms()
 
@@ -990,8 +969,9 @@ class BNO08X:
             if ticks_diff(ticks_ms(), start_time) > 50:
                 self._dbg("Timeout in _process_available_packets")
                 break
-
-        self._dbg(f"_process_available_packets done, {processed_count} packets processed")
+        flag = processed_count > 0
+        self._dbg(f"_process_available_packets done, {processed_count} packets processed - {flag}")
+        return flag
 
     def _wait_for_packet_type(self, channel, timeout=3.0):
         """
@@ -1011,41 +991,37 @@ class BNO08X:
 
         raise RuntimeError(f"Timeout waiting for packet on channel {channel}")
 
-    #     def _wait_for_packet(self, timeout: float = _PACKET_READ_TIMEOUT) -> Packet:
-    #         start_time = ticks_ms()
-    #         while _elapsed_sec(start_time) < timeout:
-    #             if not self._data_ready:
-    #                 continue
-    #             new_packet = self._read_packet()
-    #             return new_packet
-    #         raise RuntimeError("Timed out waiting for a packet")
-    # --- in bno08x.py (replace original _wait_for_packet) ---
-    def _wait_for_packet(self, timeout: float = _PACKET_READ_TIMEOUT) -> Packet:
+    def _wait_for_packet(self, channel, report_id=None, timeout=0.5):
+        """
+        Polls the BNO08x for a specific packet response up to a timeout.
+        
+        @param channel: SHTP channel 
+        @param report_id: specific SHTP ReportID to wait for (optional).
+        @param timeout: Timeout duration in seconds.
+        @return: received packet.
+        @raises: RuntimeError if timeout occurs.
+        """
         start_time = ticks_ms()
         while _elapsed_sec(start_time) < timeout:
-            new_packet = None
-
+            # Attempt a non-blocking read via the SPI driver
+            # check for INT line and read the SHTP header
+            # return the full packet or None/raise an exception if no packet is ready
             try:
-                new_packet = self._read_packet(wait=False)
+                packet = self._read_packet(wait=False)
+
+                if packet is not None:
+                    self._handle_packet(packet)
+
+                    if channel == packet.header.channel_number and (report_id is None or report_id == packet.report_id):
+                        return packet
+
             except PacketError:
-                # PacketError if header length is 0 or 0xFFFF (no data ready)
                 pass
 
-            if new_packet:
-                self._dbg("_wait_for_packet: SUCCESS: Non-blocking read returned a packet.")  # <-- ADD THIS
-                return new_packet
-
-            if self._data_ready:
-                try:
-                    self._dbg(
-                        "_wait_for_packet: self._data_ready INT asserted, performing blocking read.")  # <-- ADD THIS
-                    new_packet = self._read_packet(wait=True)
-                    return new_packet
-                except PacketError:
-                    continue  # Skip and try again
             sleep_ms(1)
 
-        raise RuntimeError("Timed out waiting for a packet")
+        raise RuntimeError(
+            f"Timed out waiting for packet on channel {channel} with ReportID {report_id} after {timeout}s")
 
     # update the cached sequence number so we know what to increment from
     # TODO: this is wrong there should be one per channel per direction
@@ -1098,7 +1074,7 @@ class BNO08X:
 
     def _handle_control_report(self, report_id: int, report_bytes: bytearray) -> None:
         """
-        Handle control reports. Want timestamps to return quickly
+        Handle control reports. %imestamps first return quickly
         :param report_id: report ID
         :param report_bytes: portion of packet for report
         :return:
@@ -1158,7 +1134,7 @@ class BNO08X:
 
     def _process_report(self, report_id: int, report_bytes: bytearray) -> None:
         """
-        Process reports
+        Process reports both sensor and control reports
         Extract accuracy and delay from each report (100usec ticks)
         TODO: BRC determine how to expose accuracy and delay to users
         """
@@ -1166,14 +1142,21 @@ class BNO08X:
             self._handle_control_report(report_id, report_bytes)
             return
         self._dbg(f"_process_report: {reports[report_id]}")
+        #         if self._debug:
+        #             outstr = ""
+        #             for idx, packet_byte in enumerate(report_bytes):
+        #                 packet_index = idx
+        #                 if (packet_index % 4) == 0:
+        #                     outstr += f"\nDBG::\t\t[0x{packet_index:02X}] "
+        #                 outstr += f"0x{packet_byte:02X} "
+        #             self._dbg(outstr)
+        #             self._dbg("")
         if self._debug:
-            outstr = ""
-            for idx, packet_byte in enumerate(report_bytes):
-                packet_index = idx
-                if (packet_index % 4) == 0:
-                    outstr += f"\nDBG::\t\t[0x{packet_index:02X}] "
-                outstr += f"0x{packet_byte:02X} "
-            self._dbg(outstr)
+            lines = []
+            for i in range(0, len(report_bytes), 4):
+                chunk = " ".join(f"0x{b:02X}" for b in report_bytes[i:i + 4])
+                lines.append(f"DBG::\t\t[0x{i:02X}] {chunk}")
+            self._dbg("\n".join(lines))
             self._dbg("")
 
         if report_id == BNO_REPORT_STEP_COUNTER:
@@ -1200,7 +1183,77 @@ class BNO08X:
             self._report_values[BNO_REPORT_ACTIVITY_CLASSIFIER] = activity_classification
             return
 
-        # sensor_data is a tuple
+        # Raw Magnetometer: returns 4-tuple: x, y, z, and time_stamp
+        # Raw accelerometer: returns 4-tuple: x, y, z, and time_stamp
+        # time_stamp units in microseconds
+        if report_id == BNO_REPORT_RAW_ACCELEROMETER or report_id == BNO_REPORT_RAW_MAGNETOMETER:
+            data_offset = 4
+            report_id = report_bytes[0]
+            scalar, count, _report_length = _AVAIL_SENSOR_REPORTS[report_id]
+
+            results = []
+            # get 3 raw accelerometer x,y,z 16-bit values
+            for _offset_idx in range(count):
+                total_offset = data_offset + (_offset_idx * 2)
+                raw_data = unpack_from("<H", report_bytes, total_offset)[0]
+                results.append(raw_data)
+
+            # get 32-bit time_stamp from raw accelerometer, time_stamp units in microseconds
+            time_stamp = unpack_from("<I", report_bytes, 12)[0]
+            results.append(time_stamp)
+
+            sensor_data = tuple(results)
+            if self._debug:
+                outstr = "\t\t\t\tReading for %s %s Time_stamp %u" % (_REPORTS_DICTIONARY[report_id], str(sensor_data),
+                                                                      time_stamp)
+                print(outstr)
+
+            # TODO: FIXME; Sensor reports are batched in a LIFO which means that multiple reports
+            # for the same type will end with the oldest/last being kept and the other
+            # newer reports thrown away
+            self._report_values[report_id] = sensor_data
+            return
+
+        # Raw gyroscope: returns 5-tuple: x, y, z, celsius, and time_stamp
+        # time_stamp units in microseconds
+        # Celsius float units in celsius
+        if report_id == BNO_REPORT_RAW_GYROSCOPE:
+            data_offset = 4
+            report_id = report_bytes[0]
+            scalar, count, _report_length = _AVAIL_SENSOR_REPORTS[report_id]
+
+            results = []
+            # get 3 raw gyroscope x,y,z 16-bit values
+            for _offset_idx in range(count):
+                total_offset = data_offset + (_offset_idx * 2)
+                raw_data = unpack_from("<H", report_bytes, total_offset)[0]
+                results.append(raw_data)
+
+            # get temperature from raw gyroscope
+            # Cera support: temp_int is signed 16-bit int, 0.5C/LSB, center offset is 23°C
+            temp_int = unpack_from("<h", report_bytes, 10)[0]
+            celsius = (temp_int / 2.0) + 23.0
+            results.append(celsius)
+
+            # get 32-bit time_stamp from raw gyroscope, time_stamp units in microseconds
+            time_stamp = unpack_from("<I", report_bytes, 12)[0]
+            results.append(time_stamp)
+
+            sensor_data = tuple(results)
+            if self._debug:
+                outstr = "\t\t\t\tReading for %s %s Time_stamp %u" % (_REPORTS_DICTIONARY[report_id], str(sensor_data),
+                                                                      time_stamp)
+                print(outstr)
+
+            # TODO: FIXME; Sensor reports are batched in a LIFO which means that multiple reports
+            # for the same type will end with the oldest/last being kept and the other
+            # newer reports thrown away
+            self._report_values[report_id] = sensor_data
+            self._dbg(f"Report: {reports[report_id]}, {sensor_data=}")
+
+            return
+
+        # General Case all other sensors, sensor_data is a 3-tuple
         sensor_data, accuracy, delay_us = _parse_sensor_report_data(report_bytes)
         self._dbg(f"Report: {reports[report_id]}, {sensor_data=}, {accuracy=}, {delay_us=} usec")
         # TODO: BRC only magnetic accuracy can be user visible, but all reports have accuracy
@@ -1211,79 +1264,84 @@ class BNO08X:
         # for the same type will end with the oldest/last being kept and the other
         # newer reports thrown away
         self._report_values[report_id] = sensor_data
-
-    # TODO: Make this a Packet creation
-    @staticmethod
-    def _get_feature_enable_report(
-            feature_id: int,
-            report_interval: int,
-            sensor_specific_config: int = 0,
-    ) -> bytearray:
-        set_feature_report = bytearray(17)
-        set_feature_report[0] = _SET_FEATURE_COMMAND
-        set_feature_report[1] = feature_id
-        pack_into("<I", set_feature_report, 5, report_interval)
-        pack_into("<I", set_feature_report, 13, sensor_specific_config)
-
-        return set_feature_report
+        return
 
     # Enable a given feature of the BNO08x (See Hillcrest 6.5.4)
     def enable_feature(self, feature_id, freq=None):
-        self._dbg("ENABLING FEATURE ID...", feature_id)
+        """
+        Enable Features the bno08x is to return.
+        Called recursively since some raw require non-raw to be enabled
+        
+        send _SET_FEATURE_COMMAND (0xfb) with feature id
+        await GET_FEATURE_RESPONSE (0xfc) 
+        both are on Channel (0x02)
+        """
+        self._dbg(f"ENABLING FEATURE ID... {hex(feature_id)}")
 
         set_feature_report = bytearray(17)
         set_feature_report[0] = _SET_FEATURE_COMMAND
         set_feature_report[1] = feature_id
+
         if freq is not None:
             AVAIL_REPORT_FREQ[feature_id] = freq
-        report_interval = int(1_000_000 / AVAIL_REPORT_FREQ[feature_id])
-        pack_into("<I", set_feature_report, 5, report_interval)
+        else:
+            AVAIL_REPORT_FREQ[feature_id] = _DEFAULT_REPORT_INTERVAL
+
+        requested_interval = int(1_000_000 / AVAIL_REPORT_FREQ[feature_id])
+
+        pack_into("<I", set_feature_report, 5, requested_interval)
+
         if feature_id == BNO_REPORT_ACTIVITY_CLASSIFIER:
             pack_into("<I", set_feature_report, 13, _ENABLED_ACTIVITIES)
 
         feature_dependency = _RAW_REPORTS.get(feature_id, None)
         if feature_dependency and feature_dependency not in self._report_values:
             self._dbg("\tEnabling feature dependency:", feature_dependency)
-            self.enable_feature(feature_dependency)
+            self.enable_feature(feature_dependency, AVAIL_REPORT_FREQ[feature_dependency])
 
-        # TODO: Understand pulse and wait after pulse need to be much longer than in spi.py
-        # in order for enable features to work here
         if self._wake_pin is not None:
-            self._dbg("WAKE Pulse to ensure BNO08x is out of sleep before INT.")
-            self._wake.value(0)
-            sleep_ms(1)
-            self._wake.value(1)
-            sleep_ms(40)  # 6.5.4. BNO08X wakeup from wake signal assert (twk) 150 µs
-            
+            self._dbg("Enable feature WAKE Pulse to ensure BNO08x is out of sleep before INT.")
+            self._wake_pin.value(0)
+            sleep_ms(1)  # lower than 1ms doesn't seem to work
+            self._wake_pin.value(1)
+            sleep_ms(5)  # 1 ms works, 1 ms sometimes fails
 
-        # Send command
         self._send_packet(_BNO_CHANNEL_CONTROL, set_feature_report)
-        sleep_ms(50)
 
-        # Aggressive Polling
-        start_time = ticks_ms()
-        while _elapsed_sec(start_time) < _FEATURE_ENABLE_TIMEOUT:
+        try:
+            # TODO BRC May need to revert to general Packeet handling since previous enabled functions
+            # already start sending reports and this may get mixed up
+            report_bytes = self._wait_for_packet(_BNO_CHANNEL_CONTROL, _GET_FEATURE_RESPONSE,
+                                                 timeout=_FEATURE_ENABLE_TIMEOUT)
+            # report_id (B), feature_report_id(B), feature_flags (B), change_sensitivity(H),
+            # report_interval (I), batch_interval_word (I), sensor_specific_configuration_word (I)
+            _, fid, _, _, report_interval, _, _ = _parse_get_feature_response_report(report_bytes.data)
 
-            # single, non-blocking header read.
-            try:
-                new_packet = self._read_packet(wait=False)
-                self._dbg("Got a packet via aggressive non-blocking read.")
+            self._report_values[feature_id] = _INITIAL_REPORTS.get(feature_id, (0.0, 0.0, 0.0))
+            self._report_periods_dictionary_us[feature_id] = report_interval
+            self._dbg(f"_report_values={self._report_values}")
+            self._dbg(f"Report confirms: Feature ID {hex(fid)=}")
+            self._dbg(
+                f"Requested: Interval {requested_interval / 1000.0:.1f} ms, {1_000_000 / requested_interval:.1f} Hz")
+            self._dbg(f"Actual   : Interval {report_interval / 1000.0:.1f} ms, {1_000_000 / report_interval:.1f} Hz")
+            self._dbg(f"Period Dictionary usec ={self._report_periods_dictionary_us}")
+            return
 
-                # Add to dictionary of feature and values placeholder, default(0.0, 0.0, 0.0)
-                self._report_values[feature_id] = _INITIAL_REPORTS.get(feature_id, (0.0, 0.0, 0.0))
-                self._handle_packet(new_packet)
+        except RuntimeError:
+            raise RuntimeError(f"BNO08X: enable_feature: not able to enable feature: {feature_id}")
 
-            except PacketError:
-                pass
+    # TODO document this for user, put in test code
+    def report_period_us(self, feature_id):
+        """
+        return 
+        """
+        return self._report_periods_dictionary_us[feature_id]
 
-            if feature_id in self._report_values:
-                self._dbg(f"Feature ID {feature_id} enabled: {_REPORTS_DICTIONARY[feature_id]}")
-                self._dbg(f"Feature Dictionary={self._report_values}")
-                return
-
-            sleep_ms(5)  # polling delay
-
-        raise RuntimeError(f"BNO08X: enable_feature: not able to enable feature: {feature_id}")
+    def print_report_period(self):
+        print(f"Enabled Report Periods:")
+        for feature_id in self._report_periods_dictionary_us.keys():
+            period_ms = self.report_period_us(feature_id) / 1000.0
+            print(f"\t{feature_id}: {_REPORTS_DICTIONARY[feature_id]}, {period_ms:.1f} ms, {1_000 / period_ms:.1f} Hz")
 
     def set_orientation(self, quaternion):
         return  # Procedure to be completed and corrected
@@ -1377,7 +1435,7 @@ class BNO08X:
         self._reset_pin.value(1)
         sleep_ms(10)
         self._reset_pin.value(0)
-        sleep_ms(10)
+        sleep_ms(10)  # TODO try sleep_us(1), data sheet say only 10ns required, 
         self._reset_pin.value(1)
         sleep_ms(200)  # orig was 10ms, datasheet implies 94 ms required
         self._dbg("*** Hard Reset End, awaiting Acknowledgement")
