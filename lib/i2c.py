@@ -51,7 +51,7 @@ class BNO08X_I2C(BNO08X):
         packet = Packet(self._data_buffer)
         self._dbg("Sending packet:")
         self._dbg(packet)
-        # BRC
+
         self._i2c.writeto(self._bno_i2c_addr, self._data_buffer[:write_length])
 
         self._sequence_number[channel] = (self._sequence_number[channel] + 1) % 256
@@ -62,7 +62,6 @@ class BNO08X_I2C(BNO08X):
 
     def _read_header(self):
         """Reads the first 4 bytes available as a header"""
-        # BRC
         self._i2c.readfrom_into(self._bno_i2c_addr, self._data_buffer_memoryview[:4])
 
         packet_header = Packet.header_from_buffer(self._data_buffer)
@@ -70,8 +69,8 @@ class BNO08X_I2C(BNO08X):
         self._dbg(packet_header)
         return packet_header
 
-    def _read_packet(self):
-        # BRC
+    # wait parameter needed for spi.py, but not needed for i2c
+    def _read_packet(self, wait=None):
         self._i2c.readfrom_into(self._bno_i2c_addr, self._data_buffer_memoryview[:4])
         self._dbg("")
 
@@ -114,7 +113,6 @@ class BNO08X_I2C(BNO08X):
                 "!!!!!!!!!!!! ALLOCATION: increased _data_buffer to bytearray(%d) !!!!!!!!!!!!! "
                 % total_read_length
             )
-        # BRC
         self._i2c.readfrom_into(self._bno_i2c_addr, self._data_buffer_memoryview[:total_read_length])
 
     @property
