@@ -5,7 +5,7 @@
 from bno08x import *
 from machine import SPI, Pin
 from spi import BNO08X_SPI
-from utime import ticks_ms
+from utime import ticks_ms, ticks_diff
 from time import sleep
 
 int_pin = Pin(14, Pin.IN, Pin.PULL_UP)  # Interrupt, enables BNO to signal when ready
@@ -63,4 +63,4 @@ while True:
         calibration_good_at = None
         save_pending = False
 
-print("calibration done")
+print("Calibration done for Magnetic")
