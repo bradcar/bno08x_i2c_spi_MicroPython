@@ -24,7 +24,7 @@ bno = BNO08X_SPI(spi, cs, reset_pin, int_pin, wake_pin, debug=False)
 print(spi)  # polarity=1, phase=1 for bno08x
 print("====================================\n")
 
-bno.enable_feature(BNO_REPORT_ACCELEROMETER, 150)
+bno.enable_feature(BNO_REPORT_ACCELEROMETER, 100)
 bno.print_report_period()
 print("BNO08x sensors enabled\n")
 
@@ -36,7 +36,6 @@ while True:
     accel_x, accel_y, accel_z = bno.acceleration
     end = ticks_ms()
     print(f"Accel  X: {accel_x:+.3f}  Y: {accel_y:+.3f}  Z: {accel_z:+.3f}  m/s² - {end-start} ms")
-
     start = end
 
 
