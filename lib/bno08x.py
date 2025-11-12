@@ -28,6 +28,7 @@ Implementation Notes
 
 * MicroPython
 
+TODO: BRC I2c add quick fail and good error message if no i2c devices found
 TODO: BRC add protection to ensure only pin objects, not numbers are passed in (spi.py, i2c.py, and uart)
 TODO: BRC Euler/quaternion implementation
 TODO: BRC add TARE
@@ -1366,15 +1367,12 @@ class BNO08X:
         set_feature_report[0] = _SET_FEATURE_COMMAND
         set_feature_report[1] = feature_id
 
-        print(f"{freq=}")
-
         if freq is None:
             requested_interval = AVAIL_REPORT_FREQ[feature_id]
         elif freq == 0:
             requested_interval = 0
         else:
             requested_interval = int(1_000_000 / freq)
-        print(f"{requested_interval=}")
 
         pack_into("<I", set_feature_report, 5, requested_interval)
 
