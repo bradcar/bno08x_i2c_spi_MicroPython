@@ -8,14 +8,13 @@
 from time import sleep
 
 from i2c import *
-#BNO08X_I2C
 from bno08x import BNO_REPORT_MAGNETOMETER, REPORT_ACCURACY_STATUS
 
 from machine import I2C, Pin
 from utime import ticks_ms, ticks_diff
 
 i2c0 = I2C(0, scl=Pin(13), sda=Pin(12), freq=100_000, timeout=200_000)
-bno = BNO08X_I2C(i2c0, address=0x4B, reset_pin=None, debug=False)
+bno = BNO08X_I2C(i2c0, address=0x4B, debug=False)
 
 bno.enable_feature(BNO_REPORT_MAGNETOMETER, 20)
 print("BNO08x reports enabled\n")
