@@ -28,11 +28,6 @@ class BNO08X_I2C(BNO08X):
         # give the parent constructor (BNO08X.__init__), the right values from BNO08X_I2C
         super().__init__(reset_pin=reset_pin, int_pin=int_pin, cs_pin=None, wake_pin=None, debug=debug)
 
-        # BRC
-        # with self.bus_device_obj as i2c:
-        #     i2c.write(self._data_buffer, end=write_length)
-        # self._i2c.writeto(self._bno_i2c_addr, self._data_buffer[:write_length])
-
     def _send_packet(self, channel, data):
         data_length = len(data)
         write_length = data_length + 4
@@ -103,10 +98,7 @@ class BNO08X_I2C(BNO08X):
         total_read_length = requested_read_length + 4
         if total_read_length > DATA_BUFFER_SIZE:
             self._data_buffer = bytearray(total_read_length)
-            self._dbg(
-                "!!!!!!!!!!!! ALLOCATION: increased _data_buffer to bytearray(%d) !!!!!!!!!!!!! "
-                % total_read_length
-            )
+            self._dbg(f"*** ALLOCATION: increased _data_buffer to bytearray({total_read_length})")
         self._i2c.readfrom_into(self._bno_i2c_addr, self._data_buffer_memoryview[:total_read_length])
 
     @property
