@@ -145,6 +145,11 @@ Unfortunately, the BNO080, BNO085, and BNO086 all use **_non-standard clock stre
 
 ## SPI Setup
 
+Requirements to using Sparkfun BNO086 with SPI
+1. must clear i2c jumper when using SPI or UART (https://docs.sparkfun.com/SparkFun_VR_IMU_Breakout_BNO086_QWIIC/assets/board_files/SparkFun_VR_IMU_Breakout_BNO086_QWIIC_Schematic_v10.pdf)
+2. must have solder blob ONLY on SP1, must have Wake pin connect to a pin.
+3. UART MUST be set to baudrate=3000000
+
 In order to use SPI on most sensor boards instead of I2C you must often have to add ONE solder blob on PS1. 
 On the back side of Sparkfun BNO086 and Adafruit BNO085, one needs a solder blob to bridge PS1.
 PS0 must be connected to a GPIO so it can be pulsed low to serve as the SPI's WAKE functionality can be performed.
@@ -169,7 +174,15 @@ If you put a solder blob on both PS0 and PS1, this driver is likely to hang.
 
 ## UART Setup
 
-UART has not been implemented.
+PS0 and PS1 are the host interface protocol selection pins, therefore UART can not use wake pin.  In order to use UART, PS1 must be high (solder blob) and PS0/WAKE not have solder blob so it is tied to ground.
+
+1. must clear i2c jumper when using SPI or UART (https://docs.sparkfun.com/SparkFun_VR_IMU_Breakout_BNO086_QWIIC/assets/board_files/SparkFun_VR_IMU_Breakout_BNO086_QWIIC_Schematic_v10.pdf)
+2. must have solder blob ONLY on SP1, must NOT have Wake pin connect to a pin.
+
+## UART-RVC - NOT SUPPORTED (RVC, Robot Vacuum Cleaners)
+
+The BNO08X has a simplified UART interface for use on unmanned ground roving robot and robot vacuum cleaners (RVC).
+This is a very different protocol and not supported in my driver. Take a look at: https://github.com/rdagger/micropython-bno08x-rvc
 
 ## Report Maximum Frequencioes
 
