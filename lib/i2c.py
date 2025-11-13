@@ -4,15 +4,9 @@
 # SPDX-FileCopyrightText: Copyright (c) 2020 Bryan Siepert for Adafruit Industries
 # SPDX-License-Identifier: MIT
 #
-
-# SPDX-FileCopyrightText: Copyright (c) 2020 Bryan Siepert for Adafruit Industries
-#
-# SPDX-License-Identifier: MIT
 """
 Subclass of `BNO08X` to use I2C
 """
-
-# from adafruit_bus_device import i2c_device
 
 from struct import pack_into
 

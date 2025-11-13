@@ -78,4 +78,4 @@ while True:
 #     print(f"Rot Vect Quat I: {quat_i:+.3f}  J: {quat_j:+.3f}  K: {quat_k:+.3f}  Real: {quat_real:+.3f}")
 #     roll, tilt, yaw = bno.euler
 #     print(f"Euler Angle   R: {roll:+.3f}  T: {tilt:+.3f}  Y: {yaw:+.3f}")
-    print()
+#     print()
