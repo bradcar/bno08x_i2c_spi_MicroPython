@@ -20,11 +20,16 @@ class BNO08X_UART(BNO08X):
     """Library for the BNO08x IMUs from CEVA & Hillcrest Laboratories
     """
 
-    def __init__(self, uart, reset_pin=None, int_pin=None, debug=False):
+    def __init__(self, uart, reset_pin=None, int_pin=None, wake_pin=None, debug=False):
         self._uart = uart
+        self._reset = reset_pin
+        self._int = int_pin
+        self._wake = wake_pin
+        if self._wake:
+            self._wake.value(1)
 
         # Call parent constructor first to initialize self._debug and other base attributes.
-        super().__init__(reset_pin=reset_pin, int_pin=int_pin, cs_pin=None, wake_pin=None, debug=debug)
+        super().__init__(reset_pin=reset_pin, int_pin=int_pin, cs_pin=None, wake_pin=wake_pin, debug=debug)
 
     def _send_packet(self, channel, data):
         data_length = len(data)
