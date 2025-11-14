@@ -59,24 +59,24 @@ class BNO08X_UART(BNO08X):
         self._data_buffer[4: 4 + data_length] = data
 
         self._uart.write(b"\x7e")  # start byte
-        sleep_us(101)  # was sleep_ms(1)
+        sleep_us(110) #was sleep_ms(1)
         self._uart.write(b"\x01")  # SHTP byte
-        sleep_us(101)  # was sleep_ms(1)
+        sleep_us(110) #was sleep_ms(1)
 
         # writing byte-by-byte with a delay, standard UART prefers large write
         for b in self._data_buffer[0:write_length]:
             byte_buffer[0] = b
             self._uart.write(byte_buffer)
-            sleep_us(101)  # was sleep_ms(1)
+            sleep_us(110) #was sleep_ms(1)
 
         # end byte
         self._uart.write(b"\x7e")
 
         # print("Sending", [hex(x) for x in self._data_buffer[0:write_length]])
 
-        # print(f"MP _send_packet: PRE-UPDATE TX Seq {channel=} - {self._tx_sequence_number[channel]}") # <-- ADD THIS
+        #print(f"MP _send_packet: PRE-UPDATE TX Seq {channel=} - {self._tx_sequence_number[channel]}") # <-- ADD THIS
         self._tx_sequence_number[channel] = (self._tx_sequence_number[channel] + 1) % 256
-        # print(f"MP _send_packet: POST-UPDATE TX Seq {channel=} - {self._tx_sequence_number[channel]}") # <-- ADD THIS
+        #print(f"MP _send_packet: POST-UPDATE TX Seq {channel=} - {self._tx_sequence_number[channel]}") # <-- ADD THIS
 
         return self._tx_sequence_number[channel]
 
@@ -105,6 +105,7 @@ class BNO08X_UART(BNO08X):
                 b ^= 0x20
             buf[idx] = b
         # print("UART Read buffer: ", [hex(i) for i in buf[start:end]])
+        
 
     def _read_header(self):
         """Reads the first 4 bytes available as a header"""
@@ -115,26 +116,27 @@ class BNO08X_UART(BNO08X):
             data = self._uart.read(1)
             self._dbg(f"_read_packet in while: b = {data}")
             if not data:
-                # print("MP _read_header: NO DATA") # <-- ADD THIS
+                #print("MP _read_header: NO DATA") # <-- ADD THIS
 
                 # If no data is available (e.g., non-blocking read or timeout), continue loop
                 # In MicroPython, a blocking read of 1 may return None on timeout.
                 continue
             b = data[0]
-            # print(f"MP _read_header: Read {hex(b)}") # <-- ADD THIS
+            #print(f"MP _read_header: Read {hex(b)}") # <-- ADD THIS
 
             if b == 0x7E:
                 break
 
         # read protocol id
         data = self._uart.read(1)
-        # print(f"MP _read_header: Protocol ID Check: {data}") # <-- ADD THIS
+        #print(f"MP _read_header: Protocol ID Check: {data}") # <-- ADD THIS
 
         self._dbg(f"_read_packet read protocol id: b = {data}")
 
         if data and data[0] == 0x7E:  # second 0x7e, skip and read again
             data = self._uart.read(1)
-            # print(f"MP _read_header: Second 0x7E, new ID: {data}") # <-- ADD THIS
+            #print(f"MP _read_header: Second 0x7E, new ID: {data}") # <-- ADD THIS
+
 
         # required protocol ID (0x01)
         if not data or data[0] != 0x01:
@@ -144,6 +146,7 @@ class BNO08X_UART(BNO08X):
         self._read_into(self._data_buffer, end=4)
 
         # print("SHTP Header:", [hex(x) for x in self._data_buffer[0:4]])
+    
 
     def _read_packet(self, wait=None):
         self._read_header()
@@ -152,20 +155,20 @@ class BNO08X_UART(BNO08X):
         packet_byte_count = header.packet_byte_count
         channel = header.channel_number
         sequence_number = header.sequence_number
-
+        
         # TODO remove this after debug
         if channel >= len(self._rx_sequence_number):
             print(f"!!! WARNING: Received unexpected {channel=} {hex(channel)=}. Discarding packet.")
             # Read and discard the end byte to clear the buffer for the next packet
-            self._uart.read(1)
+            self._uart.read(1) 
             # Use PacketError so the calling function can loop and try again
             raise PacketError(f"Invalid channel number: {channel}")
 
         self._rx_sequence_number[channel] = sequence_number
         if packet_byte_count == 0:
             raise PacketError("No packet available")
-
-        # print(f" MP _read_packet: START READ: {channel=}, Seq {sequence_number}, {packet_byte_count=}") # <-- ADD THIS
+        
+        #print(f" MP _read_packet: START READ: {channel=}, Seq {sequence_number}, {packet_byte_count=}") # <-- ADD THIS
         self._dbg(f"channel {channel} has {packet_byte_count} bytes available to read")
 
         if packet_byte_count > DATA_BUFFER_SIZE:
@@ -173,31 +176,32 @@ class BNO08X_UART(BNO08X):
             self._data_buffer = bytearray(packet_byte_count)
 
         self._read_into(self._data_buffer, start=4, end=packet_byte_count)
-        # print(f"MP _read_packet: LAST DATA BYTE: {hex(self._data_buffer[packet_byte_count - 1])}") # <-- ADD THIS
+        #print(f"MP _read_packet: LAST DATA BYTE: {hex(self._data_buffer[packet_byte_count - 1])}") # <-- ADD THIS
 
         # Check for the packet end byte (0x7E)
         data = self._uart.read(1)
         if not data or data[0] != 0x7E:
             raise RuntimeError("Didn't find packet end")
-        # print("MP _read_packet: Found END 0x7E") # <-- ADD THIS
+        #print("MP _read_packet: Found END 0x7E") # <-- ADD THIS
+
 
         new_packet = Packet(self._data_buffer)
         self._dbg(f"New Packet: {new_packet}")
 
-        # print(f"MP _read_packet: PRE-UPDATE RX Seq {channel=} {self._rx_sequence_number[channel]}") # <-- ADD THIS
+        #print(f"MP _read_packet: PRE-UPDATE RX Seq {channel=} {self._rx_sequence_number[channel]}") # <-- ADD THIS
         self._update_sequence_number(new_packet)
-        # print(f"MP _read_packet: POST-UPDATE RX Seq {channel=} {self._rx_sequence_number[channel]}") # <-- ADD THIS
+        #print(f"MP _read_packet: POST-UPDATE RX Seq {channel=} {self._rx_sequence_number[channel]}") # <-- ADD THIS
 
         return new_packet
+
 
     @property
     def _data_ready(self):
         self._dbg(f"_data_ready: {self._uart.any()}")
         return self._uart.any() >= 4
 
-    # defined in main class, but simplified to const's directly
-    # BNO_CHANNEL_SHTP_COMMAND = 0x00)
-    # BNO_CHANNEL_EXE = 0x01)
+    # UART must have it's own hard & soft resets
+    # BNO_CHANNEL_SHTP_COMMAND = 0x00) defined in main class but used as constants here
     def soft_reset(self):
         """Reset the sensor to an initial unconfigured state"""
         print("Soft resetting...", end="")
@@ -212,10 +216,32 @@ class BNO08X_UART(BNO08X):
             if packet.channel_number == 0x00:
                 break
 
-        self._tx_sequence_number = [0, 0, 0, 0, 0, 0]  # Reset ALL TX sequences to 0
+        # reset TX sequence numbers
+        self._tx_sequence_number = [0, 0, 0, 0, 0, 0] # Reset ALL TX sequences to 0
+        self._dbg("End Soft RESET in UART ")
 
-#         data = bytearray([1])
-#         self._send_packet(0x01, data)
-#         sleep_ms(500)
-#         self._send_packet(0x01, data)
-#         sleep_ms(500)
+
+    def hard_reset(self) -> None:
+        """Hardware reset the sensor to an initial unconfigured state"""
+        if not self._reset_pin:
+            return
+
+        self._dbg("*** Hard Reset in UART start...")
+        self._reset_pin.value(1)
+        sleep_ms(10)
+        self._reset_pin.value(0)
+        sleep_ms(10)  # TODO try sleep_us(1), data sheet say only 10ns required,
+        self._reset_pin.value(1)
+        sleep_ms(200)  # orig was 10ms, datasheet implies 94 ms required
+        
+        # read the SHTP announce command packet response
+        while True:
+            packet = self._read_packet()
+            if packet.channel_number == 0x00:
+                break
+
+        # reset TX sequence numbers
+        self._tx_sequence_number = [0, 0, 0, 0, 0, 0] # Reset ALL TX sequences to 0
+        self._dbg("*** Hard Reset End in UART")
+
+
