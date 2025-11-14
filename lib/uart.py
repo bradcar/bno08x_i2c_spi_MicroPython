@@ -50,7 +50,7 @@ class BNO08X_UART(BNO08X):
 
         pack_into("<H", self._data_buffer, 0, write_length)
         self._data_buffer[2] = channel
-        self._data_buffer[3] = self._sequence_number[channel]
+        self._data_buffer[3] = self._tx_sequence_number[channel]
         # Slicing is identical
         self._data_buffer[4: 4 + data_length] = data
 
@@ -71,8 +71,11 @@ class BNO08X_UART(BNO08X):
 
         # print("Sending", [hex(x) for x in self._data_buffer[0:write_length]])
 
-        self._sequence_number[channel] = (self._sequence_number[channel] + 1) % 256
-        return self._sequence_number[channel]
+        #print(f"MP _send_packet: PRE-UPDATE TX Seq {channel=} - {self._tx_sequence_number[channel]}") # <-- ADD THIS
+        self._tx_sequence_number[channel] = (self._tx_sequence_number[channel] + 1) % 256
+        #print(f"MP _send_packet: POST-UPDATE TX Seq {channel=} - {self._tx_sequence_number[channel]}") # <-- ADD THIS
+
+        return self._tx_sequence_number[channel]
 
     def _read_into(self, buf, start=0, end=None):
         if end is None:
@@ -111,19 +114,27 @@ class BNO08X_UART(BNO08X):
             data = self._uart.read(1)
             self._dbg(f"_read_packet in while: b = {data}")
             if not data:
+                #print("MP _read_header: NO DATA") # <-- ADD THIS
+
                 # If no data is available (e.g., non-blocking read or timeout), continue loop
                 # In MicroPython, a blocking read of 1 may return None on timeout.
                 continue
             b = data[0]
+            #print(f"MP _read_header: Read {hex(b)}") # <-- ADD THIS
+
             if b == 0x7E:
                 break
 
         # read protocol id
         data = self._uart.read(1)
+        #print(f"MP _read_header: Protocol ID Check: {data}") # <-- ADD THIS
+
         self._dbg(f"_read_packet read protocol id: b = {data}")
 
         if data and data[0] == 0x7E:  # second 0x7e, skip and read again
             data = self._uart.read(1)
+            #print(f"MP _read_header: Second 0x7E, new ID: {data}") # <-- ADD THIS
+
 
         # required protocol ID (0x01)
         if not data or data[0] != 0x01:
@@ -140,42 +151,56 @@ class BNO08X_UART(BNO08X):
 
         header = Packet.header_from_buffer(self._data_buffer)
         packet_byte_count = header.packet_byte_count
-        channel_number = header.channel_number
+        channel = header.channel_number
         sequence_number = header.sequence_number
+        
+        # TODO remove this after debug
+        if channel >= len(self._rx_sequence_number):
+            print(f"!!! WARNING: Received unexpected {channel=} {hex(channel)=}. Discarding packet.")
+            # Read and discard the end byte to clear the buffer for the next packet
+            self._uart.read(1) 
+            # Use PacketError so the calling function can loop and try again
+            raise PacketError(f"Invalid channel number: {channel}")
 
-        self._sequence_number[channel_number] = sequence_number
+        self._rx_sequence_number[channel] = sequence_number
         if packet_byte_count == 0:
             raise PacketError("No packet available")
-
-        self._dbg("channel %d has %d bytes available" % (channel_number, packet_byte_count - 4))
+        
+        #print(f" MP _read_packet: START READ: {channel=}, Seq {sequence_number}, {packet_byte_count=}") # <-- ADD THIS
+        self._dbg(f"channel {channel} has {packet_byte_count} bytes available to read")
 
         if packet_byte_count > DATA_BUFFER_SIZE:
             # Recreate buffer if it's too small
             self._data_buffer = bytearray(packet_byte_count)
 
         self._read_into(self._data_buffer, start=4, end=packet_byte_count)
+        #print(f"MP _read_packet: LAST DATA BYTE: {hex(self._data_buffer[packet_byte_count - 1])}") # <-- ADD THIS
 
         # Check for the packet end byte (0x7E)
         data = self._uart.read(1)
         if not data or data[0] != 0x7E:
             raise RuntimeError("Didn't find packet end")
+        #print("MP _read_packet: Found END 0x7E") # <-- ADD THIS
+
 
         new_packet = Packet(self._data_buffer)
         self._dbg(f"New Packet: {new_packet}")
 
+        #print(f"MP _read_packet: PRE-UPDATE RX Seq {channel=} {self._rx_sequence_number[channel]}") # <-- ADD THIS
         self._update_sequence_number(new_packet)
+        #print(f"MP _read_packet: POST-UPDATE RX Seq {channel=} {self._rx_sequence_number[channel]}") # <-- ADD THIS
 
         return new_packet
 
-# defined in main class, but simplified to const's directly 
-# BNO_CHANNEL_SHTP_COMMAND = const(0)
-# BNO_CHANNEL_EXE = const(1)
 
     @property
     def _data_ready(self):
         self._dbg(f"_data_ready: {self._uart.any()}")
         return self._uart.any() >= 4
 
+# defined in main class, but simplified to const's directly 
+# BNO_CHANNEL_SHTP_COMMAND = 0x00)
+# BNO_CHANNEL_EXE = 0x01)
     def soft_reset(self):
         """Reset the sensor to an initial unconfigured state"""
         print("Soft resetting...", end="")
@@ -189,9 +214,11 @@ class BNO08X_UART(BNO08X):
             packet = self._read_packet()
             if packet.channel_number == 0x00:
                 break
+            
+        self._tx_sequence_number = [0, 0, 0, 0, 0, 0] # Reset ALL TX sequences to 0
 
-        data = bytearray([1])
-        self._send_packet(0x01, data)
-        sleep_ms(500)
-        self._send_packet(0x01, data)
-        sleep_ms(500)
+#         data = bytearray([1])
+#         self._send_packet(0x01, data)
+#         sleep_ms(500)
+#         self._send_packet(0x01, data)
+#         sleep_ms(500)

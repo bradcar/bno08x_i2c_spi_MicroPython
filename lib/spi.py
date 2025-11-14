@@ -16,6 +16,7 @@ Requiring an active-low INT signal before the host sends a command (a Write) is 
 The BNO08x documentation indicates that for a host-to-BNO write, the host is usually free to
 initiate the transfer.
 
+todo: UART and i2c track rx sequence numbers but not spi, why?
 TODO: The BNO08x datasheet says the host must respond to H_INTN assertion within ≈10ms
 to avoid starvation. While the 3.0s timeout prevents lockup, the sleep_ms(10) in
 the loop means the driver will frequently miss the 10ms deadline when polling.
@@ -180,7 +181,7 @@ class BNO08X_SPI(BNO08X):
         channel_number = header.channel_number
         sequence_number = header.sequence_number
 
-        self._sequence_number[channel_number] = sequence_number
+        self._rx_sequence_number[channel_number] = sequence_number
 
         # Redundant check if the non-blocking logic worked, kept for robustness
         if packet_byte_count == 0:
@@ -211,7 +212,7 @@ class BNO08X_SPI(BNO08X):
 
         pack_into("<H", self._data_buffer, 0, write_length)
         self._data_buffer[2] = channel
-        self._data_buffer[3] = self._sequence_number[channel]
+        self._data_buffer[3] = self._rx_sequence_number[channel]
         self._data_buffer[4:write_length] = data
 
         self._cs.value(0)
@@ -219,8 +220,8 @@ class BNO08X_SPI(BNO08X):
         self._spi.write(self._data_buffer[:write_length])
         self._cs.value(1)
 
-        self._sequence_number[channel] = (self._sequence_number[channel] + 1) % 256
-        return self._sequence_number[channel]
+        self._rx_sequence_number[channel] = (self._rx_sequence_number[channel] + 1) % 256
+        return self._rx_sequence_number[channel]
 
     @property
     def _data_ready(self):

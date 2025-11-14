@@ -589,12 +589,13 @@ class BNO08X:
         self._timestamp_us = 0
         self._rebase_us = 0
 
-        # TODO: this is wrong there should be one per channel per direction
-        # This is true — the SHTP spec requires independent sequence counters for:
-        # Fix: Replace with:
-        # self._sequence_numbers = {ch: {"tx": 0, "rx": 0} for ch in range(6)}
-        # then update: _get_report_seq_id() and _update_sequence_number()
-        self._sequence_number: list[int] = [0, 0, 0, 0, 0, 0]
+        # TODO: seperate works for UART 
+        # TODO: check SPI and i2c to see how to update... like UART.
+        # track sequence numbers one per channel per direction
+        # the RX(inbound, last seen/expected) and TX(outbound) sequence numbers 
+        self._rx_sequence_number: list[int] = [0, 0, 0, 0, 0, 0]
+        self._tx_sequence_number: list[int] = [0, 0, 0, 0, 0, 0]
+
         self._two_ended_sequence_numbers: dict[int, int] = {}
         self._dcd_saved_at: float = -1
         self._me_calibration_started_at: float = -1.0
@@ -618,6 +619,8 @@ class BNO08X:
         else:
             self.soft_reset()
             reset_type = "Soft"
+        
+        self._tx_sequence_number = [0, 0, 0, 0, 0, 0] # Reset ALL TX sequences to 0
 
         for attempt in range(3):
             try:
@@ -1097,7 +1100,9 @@ class BNO08X:
     def _update_sequence_number(self, new_packet: Packet) -> None:
         channel = new_packet.channel_number
         seq = new_packet.header.sequence_number
-        self._sequence_number[channel] = seq
+        self._dbg(f"MP Base class Updating RX Sequence Number {channel=} to {seq}")
+        #print(f"MP Base class Updating RX Sequence Number {channel=} to {seq}")
+        self._rx_sequence_number[channel] = seq
 
     # Dobodu addressed: https://github.com/adafruit/Adafruit_CircuitPython_BNO08x/issues/49
     # Dobodu debugged CircuitPython's issue with  RuntimeError: ('Unprocessable Batch bytes', 2)
