@@ -7,13 +7,49 @@
 """
 Subclass of `BNO08X` to use UART
 
+TODO BRC Debug this:
+Start
+====================================
+UART operation reqires wake_pin is None, wake_pin=None
+ >>>Open Question Does UART operation need more time to Enable features
+BNO08x sensors enabled
+
+Enabled Report Periods:
+	1: ACCELEROMETER,	8.0 ms, 125.0 Hz
+Accel  X: -0.340  Y: -0.262  Z: +9.582  m/s² - 63 ms
+Accel  X: -0.359  Y: -0.301  Z: +9.637  m/s² - 53 ms
+Accel  X: -0.348  Y: -0.254  Z: +9.598  m/s² - 67 ms
+Accel  X: -0.328  Y: -0.254  Z: +9.590  m/s² - 75 ms
+Accel  X: -0.348  Y: -0.262  Z: +9.613  m/s² - 64 ms
+Accel  X: -0.340  Y: -0.281  Z: +9.594  m/s² - 62 ms
+!!! WARNING: Received unexpected channel=19 hex(channel)=0x13. Discarding packet.
+self._data_buffer=bytearray(b'~\x01\x13\x00\xfb\x05\x00\x00\x00\x01\x1a\x02\x00\xa7\xff\xba\xff\x97\t\x00\x00\x00...
+Accel  X: -0.328  Y: -0.273  Z: +9.586  m/s² - 63 ms
+Traceback (most recent call last):
+  File "<stdin>", line 54, in <module>
+  File "/lib/bno08x.py", line 725, in acceleration
+  File "/lib/bno08x.py", line 926, in _process_available_packets
+  File "/lib/uart.py", line 185, in _read_packet
+RuntimeError: Didn't find packet end
+
+<MY DIAGNOSIS:>
+The problem is not seeing that the bytes are a SH-2 header followed by report packets. 
+NOTICE:   
+\x01\x13\x00 looks like exactly SH-2 info. The \x01 is SH-2, the \x13\x00 is little endian which says that 16-byte length. 
+The next bytes is the time base  report  
+\xfb\x05\x00\x00\x00   
+Then it is followed by acceleration sensor  report 
+\x01\x1a\x02\x00\xa4\xff\xeb\xff\x99\t\
+
+
+
 1. The H_INTN pin is driven low prior to the initial byte of UART transmission. It will deassert and reassert
 between messages. It is used by the host to timestamp the beginning of data transmission.
 2. NRST is the reset line for the BNO08X and can be either driven by the application processor or the board
 reset.
 
-Pin 5 (PS1) and Pin 6 (PS0/WAKE) are the host interface protocol selection pins. These pins should be tied to
-VDDIO and ground respectively to select the UART-SHTP interface.
+To select UART-SHTP, PS1 must be high "1" and PS0/WAKE must be ground "0".
+This driver does not support UART-RVC mode.
 
 6.5.3 Startup timing
 The timing for BNO08X startup for I2C and SPI modes uses Reset & Interrupt.
@@ -244,5 +280,3 @@ class BNO08X_UART(BNO08X):
         # reset TX sequence numbers
         self._tx_sequence_number = [0, 0, 0, 0, 0, 0] # Reset ALL TX sequences to 0
         self._dbg("*** Hard Reset End in UART")
-
-
