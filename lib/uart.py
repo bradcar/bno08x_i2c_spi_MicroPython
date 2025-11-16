@@ -10,17 +10,24 @@ Subclass of `BNO08X` to use UART
 To select UART-SHTP, PS1 must be high "1" and PS0/WAKE must be ground "0".
 This driver does not support UART-RVC mode. This means for UART operation reqires wake_pin is None, wake_pin=None
 
-1.2.3.1 UART operation: "Bytes sent from the host to the BNO08X must be separated by at least 100us."
+1.2.3.1 UART operation: "Bytes sent from the host to the BNO08X must be separated by at least 100μs.
+Bytes sent from the BNO to the host have no extra spacing."
+
+The INT pin signifies when the UART data is to be sent:
+6.5.4 Interrupt timing: In UART-SHTP mode the interrupt is asserted prior to the UART transmission. It is assumed that the host can
+always accept data over its UART. The interrupt is asserted approx. 7.7 µs prior to the first bit of UART
+transmission. The interrupt will be de-asserted prior to the termination of the UART transmission.
 
 1. The H_INTN pin is driven low prior to the initial byte of UART transmission. It will deassert and reassert
 between messages. It is used by the host to timestamp the beginning of data transmission.
 2. NRST is the reset line for the BNO08X and can be either driven by the application processor or the board
 reset.
 
-Baud Rate: 3,000,000 baud Time per byte: ~3.3μs, f the BNO08x is sending bytes back-to-back,
+Baud Rate: 3_000_000 baud (~3.3μs/byte), if the BNO08x is sending bytes back-to-back,
 the maximum delay between 2 consecutive bytes should be only a few microseconds.
 However, the BNO08x might have internal processing delays for assembling a long report. set delay=5ms.
-uart = UART(0, baudrate=3_000_000, tx=Pin(12), rx=Pin(13), timeout=5)
+uart = UART(1, baudrate=3_000_000, tx=Pin(8), rx=Pin(9), timeout=50)
+uart = UART(0, baudrate=3_000_000, tx=Pin(12), rx=Pin(13), timeout=50)
 
 6.5.3 Startup timing
 The timing for BNO08X startup for I2C and SPI modes uses Reset & Interrupt.
@@ -47,7 +54,6 @@ class BNO08X_UART(BNO08X):
         self._reset = reset_pin
         self._int = int_pin
 
-        # Call parent constructor first to initialize self._debug and other base attributes.
         # wake_pin must be NONE!  wake_pin/PS0 = 0 (gnd)
         super().__init__(reset_pin=reset_pin, int_pin=int_pin, cs_pin=None, wake_pin=None, debug=debug)
 
@@ -81,12 +87,10 @@ class BNO08X_UART(BNO08X):
         self._tx_sequence_number[channel] = (self._tx_sequence_number[channel] + 1) % 256
         return self._tx_sequence_number[channel]
 
-
     def _read_into(self, buf, start=0, end=None):
         if end is None:
             end = len(buf)
 
-        # print("Avail:", self._uart.in_waiting, "need", end-start)
         for idx in range(start, end):
             data = self._uart.read(1)
             b = data[0]
@@ -95,12 +99,9 @@ class BNO08X_UART(BNO08X):
                 b = data[0]
                 b ^= 0x20
             buf[idx] = b
-        # print("UART Read buffer: ", [hex(i) for i in buf[start:end]])
-
 
     def _read_header(self):
         """Reads the first 4 bytes available as a header"""
-        # try to read initial packet start byte
         data = None
         while True:
             data = self._uart.read(1)
@@ -116,9 +117,8 @@ class BNO08X_UART(BNO08X):
             data = self._uart.read(1)
         if not data or data[0] != 0x01:
             raise RuntimeError("Unhandled UART control SHTP protocol")
-        # read header
+
         self._read_into(self._data_buffer, end=4)
-        # print("SHTP Header:", [hex(x) for x in self._data_buffer[0:4]])
 
     def _read_packet(self, wait=None):
         self._read_header()
@@ -129,13 +129,9 @@ class BNO08X_UART(BNO08X):
         channel = header.channel_number
         sequence_number = header.sequence_number
 
-        # Check channel validity (copied from your original code)
+        # Check channel validity
         if channel >= len(self._rx_sequence_number):
-            print(f"!!! WARNING: Received unexpected {channel=} {hex(channel)=}. Discarding packet.")
-            print(f"{self._data_buffer[:16]=}")
-            # Read and discard the end byte to clear the buffer for the next packet
-            self._uart.read(1)
-            raise PacketError(f"Invalid channel number: {channel}")
+            raise PacketError(f"Invalid channel number: {channel} {self._data_buffer[:4]=}")
 
         self._rx_sequence_number[channel] = sequence_number
         if packet_byte_count == 0:
@@ -148,8 +144,6 @@ class BNO08X_UART(BNO08X):
 
         # skip 4 header bytes since they've already been read
         self._read_into(self._data_buffer, start=4, end=packet_byte_count)
-
-        # print("Packet: ", [hex(i) for i in self._data_buffer[0:packet_byte_count]])
 
         data = self._uart.read(1)
         b = data[0]
@@ -169,10 +163,11 @@ class BNO08X_UART(BNO08X):
         self._dbg(f"_data_ready: {self._uart.any()}")
         return self._uart.any() >= 4
 
-
-    # UART must have it's own hard/soft resets BNO_CHANNEL_SHTP_COMMAND = 0x00) in main class but used as constants here
     def soft_reset(self):
-        """Reset the sensor to an initial unconfigured state"""
+        """
+        UART has its own Soft reset, since it handles the SHTP command send & recieve packets here
+        to reset it sends 0x00 (in main class this is BNO_CHANNEL_SHTP_COMMAND)
+       """
         print("Soft resetting...", end="")
 
         data = bytearray([0, 1])
@@ -187,10 +182,13 @@ class BNO08X_UART(BNO08X):
 
         # reset TX sequence numbers
         self._tx_sequence_number = [0, 0, 0, 0, 0, 0]  # Reset ALL TX sequences to 0
-        self._dbg("End Soft RESET in UART ")
+        self._dbg("End Soft RESET in uart.py")
 
     def hard_reset(self) -> None:
-        """Hardware reset the sensor to an initial unconfigured state"""
+        """
+        Hardware reset the sensor to an initial state
+        UART handles SHTP protocol and must evaluate command packet response
+        """
         if not self._reset_pin:
             return
 
@@ -215,4 +213,4 @@ class BNO08X_UART(BNO08X):
 
         # reset TX sequence numbers
         self._tx_sequence_number = [0, 0, 0, 0, 0, 0]  # Reset ALL TX sequences to 0
-        self._dbg("*** Hard Reset End in UART")
+        self._dbg("*** Hard Reset End in uart.py")

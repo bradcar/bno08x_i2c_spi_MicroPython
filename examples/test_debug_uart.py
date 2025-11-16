@@ -21,17 +21,17 @@ from utime import ticks_ms, sleep_us
 # txo = Pin(12)
 # rxi = Pin(13)
 int_pin = Pin(14, Pin.IN, Pin.PULL_UP)  # Interrupt, BNO (RST) signals when ready
-reset_pin = Pin(15, Pin.OUT)  # Reset, tells BNO (INT) to reset
+reset_pin = Pin(15, Pin.OUT, value=1)  # Reset, tells BNO (INT) to reset
 # wake_pin can NOT be used, wake/PS0 must be ground
 
-uart = UART(0, baudrate=3_000_000, tx=Pin(12), rx=Pin(13), timeout=5)
+uart = UART(1, baudrate=3_000_000, tx=Pin(8), rx=Pin(9), timeout=2000)
 
 print("Start")
 print("====================================")
 
 #bno = BNO08X_UART(uart, debug=False)
-bno = BNO08X_UART(uart, reset_pin=reset_pin, int_pin=int_pin, debug=False)
-
+#bno = BNO08X_UART(uart, reset_pin=reset_pin, int_pin=int_pin, debug=True)
+bno = BNO08X_UART(uart, reset_pin=reset_pin, int_pin=int_pin, debug=True)
 
 bno.enable_feature(BNO_REPORT_ACCELEROMETER, 125)
 
