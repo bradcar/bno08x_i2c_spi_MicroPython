@@ -490,7 +490,7 @@ class Packet:
     def __str__(self) -> str:
         length = self.header.packet_byte_count
         outstr = "\n\t\t********** Packet *************\n"
-        outstr += "DBG::\t\t HEADER:\n"
+        outstr += "DBG::\t\tHeader:\n"
         outstr += "DBG::\t\t Data Len: %d\n" % self.header.data_length
         outstr += "DBG::\t\t Channel: %s (%d)\n" % (
             channels[self.channel_number],
@@ -501,28 +501,21 @@ class Packet:
             _BNO_CHANNEL_INPUT_SENSOR_REPORTS,
         }:
             if self.report_id in reports:
-                outstr += "DBG::\t\t \tReport Type: %s (0x%x)\n" % (
+                outstr += "DBG::\t\t Report Type: %s (0x%x)\n" % (
                     reports[self.report_id],
                     self.report_id,
                 )
             else:
                 outstr += "DBG::\t\t \t** UNKNOWN Report Type **: %s\n" % hex(self.report_id)
 
-            # TODO BRC this is not correct for 0xfb
-            #             if self.report_id > 0xF0 and len(self.data) >= 6 and self.data[5] in reports:
-            #                 outstr += "DBG::\t\t \tSensor Report Type: %s(%s)\n" % (
-            #                     reports[self.data[5]],
-            #                     hex(self.data[5]),
-            #                 )
-
             if self.report_id == 0xFC and len(self.data) >= 6 and self.data[1] in reports:
-                outstr += "DBG::\t\t \tEnabled Feature: %s(%s)\n" % (
+                outstr += "DBG::\t\t Enabled Feature: %s(%s)\n" % (
                     reports[self.data[1]],
                     hex(self.data[1]),
                 )
         outstr += "DBG::\t\t Sequence number: %s\n" % self.header.sequence_number
         outstr += "\n"
-        outstr += "DBG::\t\t Data:"
+        outstr += "DBG::\t\tData:"
 
         for idx, packet_byte in enumerate(self.data[:length]):
             packet_index = idx + 4
@@ -933,9 +926,11 @@ class BNO08X:
             if new_packet:
                 self._handle_packet(new_packet)
                 processed_count += 1
-                self._dbg(f"_proc_pkt: Processed packet. Count={processed_count}")
+                self._dbg("")
+                self._dbg(f"Handle packet processed {processed_count} reports")
 
-            # safety timeout (e.g., stuck DRDY line)
+
+            # safety timeout if data ready stuck
             if ticks_diff(ticks_ms(), start_time) > 50:
                 self._dbg("Timeout in _process_available_packets")
                 break
@@ -999,18 +994,15 @@ class BNO08X:
     def _update_sequence_number(self, new_packet: Packet) -> None:
         channel = new_packet.channel_number
         seq = new_packet.header.sequence_number
-        self._dbg(f"MP Base class Updating RX Sequence Number {channel=} to {seq}")
-        #print(f"MP Base class Updating RX Sequence Number {channel=} to {seq}")
         self._rx_sequence_number[channel] = seq
 
     # Dobodu addressed: https://github.com/adafruit/Adafruit_CircuitPython_BNO08x/issues/49
     # Dobodu debugged CircuitPython's issue with  RuntimeError: ('Unprocessable Batch bytes', 2)
     def _handle_packet(self, packet):
         """
-        Split a single SPI packet into multiple reports and process them in FIFO order.
+        Split a single packet into multiple reports and process them in FIFO order.
         Handles multiple 0xF8 Product ID Response reports correctly.
         """
-        self._dbg("HANDLING PACKET...")
         try:
             next_byte_index = 0
             slices = []
@@ -1028,19 +1020,21 @@ class BNO08X:
 
                 unprocessed_byte_count = packet.header.data_length - next_byte_index
                 if unprocessed_byte_count < required_bytes:
-                    self._dbg("Unprocessable batch: skipping", unprocessed_byte_count, "bytes")
+                    self._dbg("Unprocessable batch ERROR: skipping !", unprocessed_byte_count, "bytes")
                     break
 
                 report_slice = packet.data[next_byte_index: next_byte_index + required_bytes]
                 slices.append([report_slice[0], report_slice])
                 next_byte_index += required_bytes
 
+            self._dbg(f"HANDLING {len(slices)} PACKET{'S' if len(slices) > 1 else ''}...")
             # Process in FIFO order
             for report_id, report_bytes in slices:
+                self._dbg("")
                 self._process_report(report_id, report_bytes)
 
         except Exception as error:
-            self._dbg("Error in _handle_packet:", error)
+            self._dbg(f"Error in _handle_packet:{error}")
             self._dbg("Packet bytes:", [hex(b) for b in packet.data[:packet.header.data_length]])
             raise
 
@@ -1072,7 +1066,6 @@ class BNO08X:
             self._dbg(f"*** Part Number: {sw_part_number}")
             self._dbg(f"*** Software Version: {sw_major}.{sw_minor}.{sw_patch}")
             self._dbg(f"\tBuild: {sw_build_number}")
-            self._dbg("")
             self._id_read = True
             return
 
@@ -1124,11 +1117,14 @@ class BNO08X:
         Process reports both sensor and control reports
         Extracted accuracy and delay from each report (100usec ticks)
         TODO: BRC determine how to expose accuracy and delay to users
+        
+        Multiple reports are processed in the order they appear in the packet buffer.
+        Last sensor report's value over-write previous in this packet.
+        The first (oldest) report sets self._report_values[report_id],
         """
         if report_id >= 0xF0:
             self._handle_control_report(report_id, report_bytes)
             return
-        self._dbg(f"_process_report: {reports[report_id]}")
 
         # if self._debug:
         #     lines = []
@@ -1200,9 +1196,6 @@ class BNO08X:
                                                                       time_stamp)
                 print(outstr)
 
-            # Reports are processed in the order they appear in the packet buffer. The last report processed will
-            # be the one that sticks. The first (oldest) report sets self._report_values[report_id],
-            # and then the last (newest) report overwrites the sensor data for most apps the newest is sufficient.
             self._report_values[report_id] = sensor_data
             return
 
@@ -1237,24 +1230,23 @@ class BNO08X:
                                                                       time_stamp)
                 print(outstr)
 
-            # Reports are processed in the order they appear in the packet buffer. The last report processed will
-            # be the one that sticks. The first (oldest) report sets self._report_values[report_id],
-            # and then the last (newest) report overwrites the sensor data for most apps the newest is sufficient.
             self._report_values[report_id] = sensor_data
-            self._dbg(f"Report: {reports[report_id]}, {sensor_data=}")
+            self._dbg(f"Report: {reports[report_id]}")
+            self._dbg(f"data:{sensor_data}")
+
 
             return
 
         # General Case all other sensors, sensor_data is a 3-tuple
         sensor_data, accuracy, delay_us = _parse_sensor_report_data(report_bytes)
-        self._dbg(f"Report: {reports[report_id]}, {sensor_data=}, {accuracy=}, {delay_us=} usec")
-        # TODO: BRC only magnetic accuracy can be user visible, but all reports have accuracy
+        self._dbg(f"Report: {reports[report_id]}")
+        self._dbg(f"Data: {sensor_data}, {accuracy=}, {delay_us=}")
+
+
+            # TODO: BRC only magnetic accuracy can be user visible, but all reports have accuracy
         if report_id == BNO_REPORT_MAGNETOMETER:
             self._magnetometer_accuracy = accuracy
 
-        # Reports are processed in the order they appear in the packet buffer. The last report processed will
-        # be the one that sticks. The first (oldest) report sets self._report_values[report_id],
-        # and then the last (newest) report overwrites the sensor data for most apps the newest is sufficient.
         self._report_values[report_id] = sensor_data
         return
 
@@ -1288,14 +1280,10 @@ class BNO08X:
 
         feature_dependency = _RAW_REPORTS.get(feature_id, None)
         if feature_dependency and feature_dependency not in self._report_values:
-            self._dbg("\tEnabling feature dependency:", feature_dependency)
+            self._dbg(" Feature dependency:", feature_dependency)
             self.enable_feature(feature_dependency, AVAIL_REPORT_FREQ[feature_dependency])
 
-        self._dbg("\tEnabling feature dependency:", feature_dependency)
-        print(f"UART operation reqires wake_pin is None, wake_pin={self._wake_pin}")
-        self._dbg(f"UART operation reqires wake_pin is None, wake_pin={self._wake_pin}")
-
-        # UART operation reqires self._wake_pin is None
+        # UART operation reqires wake_pin is None
         if self._wake_pin is not None:
             self._dbg("Enable feature WAKE Pulse to ensure BNO08x is out of sleep before INT.")
             self._wake_pin.value(0)
@@ -1304,12 +1292,12 @@ class BNO08X:
             sleep_ms(10)  # 1 ms works, 1 ms sometimes fails
         # TODO BRC REMOVE THIS after figure how non-wake i2c an uart handle this
         else:
-            print(f" >>>Open Question Does UART operation need more time to Enable features")
+            print(f" \tOpen Question Does UART operation need more time to Enable features?")
 
         self._send_packet(_BNO_CHANNEL_CONTROL, set_feature_report)
 
         try:
-            # TODO BRC May need to revert to general Packeet handling since previous enabled functions
+            # TODO BRC May need to revert to general Packet handling since previous enabled functions
             # already start sending reports and this may get mixed up
             report_bytes = self._wait_for_packet(_BNO_CHANNEL_CONTROL, _GET_FEATURE_RESPONSE,
                                                  timeout=_FEATURE_ENABLE_TIMEOUT)
@@ -1319,11 +1307,10 @@ class BNO08X:
 
             self._report_values[feature_id] = _INITIAL_REPORTS.get(feature_id, (0.0, 0.0, 0.0))
             self._report_periods_dictionary_us[feature_id] = report_interval
-            self._dbg(f"_report_values={self._report_values}")
-            self._dbg(f"Report confirms: Feature ID {hex(fid)=}")
-            self._dbg(f"Requested: Interval {requested_interval / 1000.0:.1f} ms")
-            self._dbg(f"Actual   : Interval {report_interval / 1000.0:.1f} ms")
-            self._dbg(f"Period Dictionary usec ={self._report_periods_dictionary_us}")
+            self._dbg(f"Report enabled: {_REPORTS_DICTIONARY[fid]}: {hex(fid)}")
+            self._dbg(f" Initial tuple={self._report_values}")
+            self._dbg(f" Requested Interval: {requested_interval / 1000.0:.1f} ms")
+            self._dbg(f" Actual    Interval: {report_interval / 1000.0:.1f} ms")
             return
 
         except RuntimeError:
