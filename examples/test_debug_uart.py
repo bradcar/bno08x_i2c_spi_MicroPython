@@ -24,7 +24,7 @@ int_pin = Pin(14, Pin.IN, Pin.PULL_UP)  # Interrupt, BNO (RST) signals when read
 reset_pin = Pin(15, Pin.OUT)  # Reset, tells BNO (INT) to reset
 # wake_pin can NOT be used, wake/PS0 must be ground
 
-uart = UART(0, baudrate=3_000_000, tx=Pin(12), rx=Pin(13), timeout=50)
+uart = UART(0, baudrate=3_000_000, tx=Pin(12), rx=Pin(13), timeout=5)
 
 print("Start")
 print("====================================")
