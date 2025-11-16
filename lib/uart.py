@@ -38,7 +38,8 @@ from bno08x import BNO08X, Packet, PacketError, DATA_BUFFER_SIZE
 
 
 class BNO08X_UART(BNO08X):
-    """Library for the BNO08x IMUs from CEVA & Hillcrest Laboratories
+    """
+    UART-SHTP class for the BNO08x IMUs from CEVA & Hillcrest Laboratories
     """
 
     def __init__(self, uart, reset_pin=None, int_pin=None, debug=False):
@@ -75,13 +76,12 @@ class BNO08X_UART(BNO08X):
             sleep_us(110)
 
         self._uart.write(b"\x7e")  # end byte
-
         # print("Sending", [hex(x) for x in self._data_buffer[0:write_length]])
 
         self._tx_sequence_number[channel] = (self._tx_sequence_number[channel] + 1) % 256
         return self._tx_sequence_number[channel]
-    
-    # same as CP
+
+
     def _read_into(self, buf, start=0, end=None):
         if end is None:
             end = len(buf)
@@ -96,8 +96,8 @@ class BNO08X_UART(BNO08X):
                 b ^= 0x20
             buf[idx] = b
         # print("UART Read buffer: ", [hex(i) for i in buf[start:end]])
-    
-    
+
+
     def _read_header(self):
         """Reads the first 4 bytes available as a header"""
         # try to read initial packet start byte
@@ -120,22 +120,21 @@ class BNO08X_UART(BNO08X):
         self._read_into(self._data_buffer, end=4)
         # print("SHTP Header:", [hex(x) for x in self._data_buffer[0:4]])
 
-
     def _read_packet(self, wait=None):
         self._read_header()
-#         print(f"rp _d_b: {self._data_buffer[:16]}")
+        # print(f"rp _d_b: {self._data_buffer[:16]}")
 
         header = Packet.header_from_buffer(self._data_buffer)
         packet_byte_count = header.packet_byte_count
         channel = header.channel_number
         sequence_number = header.sequence_number
-        
+
         # Check channel validity (copied from your original code)
         if channel >= len(self._rx_sequence_number):
             print(f"!!! WARNING: Received unexpected {channel=} {hex(channel)=}. Discarding packet.")
             print(f"{self._data_buffer[:16]=}")
             # Read and discard the end byte to clear the buffer for the next packet
-            self._uart.read(1) 
+            self._uart.read(1)
             raise PacketError(f"Invalid channel number: {channel}")
 
         self._rx_sequence_number[channel] = sequence_number
@@ -170,6 +169,7 @@ class BNO08X_UART(BNO08X):
         self._dbg(f"_data_ready: {self._uart.any()}")
         return self._uart.any() >= 4
 
+
     # UART must have it's own hard/soft resets BNO_CHANNEL_SHTP_COMMAND = 0x00) in main class but used as constants here
     def soft_reset(self):
         """Reset the sensor to an initial unconfigured state"""
@@ -186,9 +186,8 @@ class BNO08X_UART(BNO08X):
                 break
 
         # reset TX sequence numbers
-        self._tx_sequence_number = [0, 0, 0, 0, 0, 0] # Reset ALL TX sequences to 0
+        self._tx_sequence_number = [0, 0, 0, 0, 0, 0]  # Reset ALL TX sequences to 0
         self._dbg("End Soft RESET in UART ")
-
 
     def hard_reset(self) -> None:
         """Hardware reset the sensor to an initial unconfigured state"""
@@ -202,18 +201,18 @@ class BNO08X_UART(BNO08X):
         sleep_ms(10)  # TODO try sleep_us(1), data sheet say only 10ns required,
         self._reset_pin.value(1)
         sleep_ms(500)  # datasheet implies 94 ms needed, 200ms has sporatic errors, increasing to 500
-        
+
         # read the SHTP announce command packet response
         while True:
-            try: 
+            try:
                 packet = self._read_packet()
                 if packet.channel_number == 0x00:
                     break
             except PacketError:
                 # Add a small delay to prevent rapid polling if the sensor is slow to respond.
-                sleep_ms(20) 
-                continue # Safely retry reading the packet
+                sleep_ms(20)
+                continue  # Safely retry reading the packet
 
         # reset TX sequence numbers
-        self._tx_sequence_number = [0, 0, 0, 0, 0, 0] # Reset ALL TX sequences to 0
+        self._tx_sequence_number = [0, 0, 0, 0, 0, 0]  # Reset ALL TX sequences to 0
         self._dbg("*** Hard Reset End in UART")
