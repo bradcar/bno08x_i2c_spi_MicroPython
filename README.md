@@ -176,6 +176,7 @@ If you put a solder blob on both PS0 and PS1, this driver is likely to hang.
 UART wires are in some sense opposite of i2c wires (double check your wiring).
  1. BNO08x SDA to board UARTx-RX (gpio13)
  2. BNO08x SCL to board UARTx-TX (gbio12)
+3. INT Pin is required for accurate communication
 
 PS0 and PS1 are the host interface protocol selection pins, therefore UART can not use wake pin.  In order to use UART, PS1 must be high (solder blob) and PS0/WAKE not have solder blob so it is tied to ground.
 
@@ -190,17 +191,17 @@ This is a very different protocol and not supported in my driver. Take a look at
 ## Report Maximum Frequencioes
 
 | **Feature**             | **Max Frequency (Hz)** | **msec/Report** | **period we've seen** |
-|-------------------------|------------------------|-----------------|-----------------------|
-| Composite Gyro Rotation | 1000                   | 1.0 ms          | 1.0 ms                |
-| Accelerometer           | 500                    | 2.0 ms          | 4, 8, 16, 32, 64...   |
-| Rotation Vector         | 400                    | 2.5 ms          | 1.0 ms                |
-| Gaming Rotation         | 400                    | 2.5 ms          | 1.0 ms                |
-| Gravity                 | 400                    | 2.5 ms          | 1.0 ms                |
-| Linear Acceleration     | 400                    | 2.5 ms          | 1.0 ms                |
-| Gyroscope               | 400                    | 2.5 ms          | 1.0 ms                |
-| Magnetometer            | 100                    | 10.0 ms         | 1.0 ms                |
-| Geomagnetic Rotation    | 90                     | 11.1 ms         | 1.0 ms                |
-| (report default)        | 20                     | 50.0 ms         | 1.0 ms                |
+|-------------------------|------------------------|-----------------|---------------------|
+| Composite Gyro Rotation | 1000                   | 1.0 ms          | 1 ms                |
+| Accelerometer           | 500                    | 2.0 ms          | 4, 8, 16, 32, 64... |
+| Rotation Vector         | 400                    | 2.5 ms          |                     |
+| Gaming Rotation         | 400                    | 2.5 ms          |                     |
+| Gravity                 | 400                    | 2.5 ms          |                     |
+| Linear Acceleration     | 400                    | 2.5 ms          |                     |
+| Gyroscope               | 400                    | 2.5 ms          |                     |
+| Magnetometer            | 100                    | 10.0 ms         |                     |
+| Geomagnetic Rotation    | 90                     | 11.1 ms         |                     |
+| (report default)        | 20                     | 50.0 ms         |                     |
 
 Report frequencies should be enabled before requesting reports. To convert from period in ms to Hz (1000000/period.)
 
@@ -230,5 +231,7 @@ The CEVA BNO085 and BNO086 9-axis sensors are made by Ceva (https://www.ceva-ip.
 - https://www.ceva-ip.com/wp-content/uploads/BNO080_085-Datasheet.pdf
 
 - https://cdn.sparkfun.com/assets/4/d/9/3/8/SH-2-Reference-Manual-v1.2.pdf
+- 
+-https://cdn.sparkfun.com/assets/7/6/9/3/c/Sensor-Hub-Transport-Protocol-v1.7.pdf
 
 Bosch has a new 6-axis IMU BHI385 (announced June 2025) that can be paired with BMM350 3-axis Geomagnetic sensor.
