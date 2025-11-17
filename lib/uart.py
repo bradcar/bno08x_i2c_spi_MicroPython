@@ -225,19 +225,24 @@ class BNO08X_UART(BNO08X):
 
                 packet = self._read_packet() 
                 self._handle_packet(packet)
-                self._dbg(f"Read initial packet on Channel {packet.channel_number} (Seq {packet.sequence_number}).")
+                self._dbg(f"Initial packet, Channel {packet.channel_number} (Seq {packet.sequence_number}).")
 
             except (RuntimeError, PacketError):
-                # normal end-of-burst condition (timeout waiting for the next packet).
+                # expected end-of-burst condition (timeout, no more data)
+                break
+            
+            except KeyError as e:
+                self._dbg(f"exit hard reset: minor KeyError caught, likely stream end/data access, Error:{e})")
                 break 
 
             except Exception as e:
-                self._dbg(f"Fatal error during initial packet reading: {e}. Exiting burst consumption.")
-                break
+                self._dbg(f"FATAL UNEXPECTED ERROR during boot processing: (Type: {type(e)}): {e}. Exiting.")
+                raise # Re-raise when unexpected and fatal
+
 
         # Reset tx and rx sequence numbers, BNO08X initially sets sequence numbers to 0 after boot.
         self._tx_sequence_number = [0, 0, 0, 0, 0, 0]
         self._rx_sequence_number = [0, 0, 0, 0, 0, 0]
         
-        self._dbg("*** Hard Reset End in uart.py, sequence numbers synchronized.")
+        self._dbg("*** Hard Reset acknowledged in uart.py, sequence numbers reset")
         # Control returns to bno08x.py:reset_sensor which calls _check_id()

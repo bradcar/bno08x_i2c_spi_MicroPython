@@ -612,8 +612,9 @@ class BNO08X:
         else:
             self.soft_reset()
             reset_type = "Soft"
-        
-        self._tx_sequence_number = [0, 0, 0, 0, 0, 0] # Reset ALL TX sequences to 0
+            
+# TODO BRC fix in hard reset for spi and i2c  
+#        self._tx_sequence_number = [0, 0, 0, 0, 0, 0] # Reset ALL TX sequences to 0
 
         for attempt in range(3):
             try:
@@ -1034,8 +1035,7 @@ class BNO08X:
                 self._process_report(report_id, report_bytes)
 
         except Exception as error:
-            self._dbg(f"Error in _handle_packet:{error}")
-            self._dbg("Packet bytes:", [hex(b) for b in packet.data[:packet.header.data_length]])
+            self._dbg(f"Handle Packet: Packet bytes:{[hex(b) for b in packet.data[:4]]}...")
             raise
 
     def _handle_control_report(self, report_id: int, report_bytes: bytearray) -> None:
@@ -1091,8 +1091,7 @@ class BNO08X:
 
         # status, accel_en, gyro_en, mag_en, planar_en, table_en, *_reserved) = response_values
         command_status, *_rest = response_values
-        self._last_cmd_rsp = (command, command_status)  # <--- ADD THIS
-        self._dbg(f"_handle_command_response: Command={hex(command)}, Status={command_status}, seq={_seq_number}")
+        self._last_cmd_rsp = (command, command_status)  # TODO BRC is this vestigial? <--- ADD THIS
 
         if command == _ME_CALIBRATE and command_status == 0:
             self._me_calibration_started_at = ticks_ms()
@@ -1290,9 +1289,6 @@ class BNO08X:
             sleep_ms(2)  # lower than 1ms doesn't seem to work
             self._wake_pin.value(1)
             sleep_ms(10)  # 1 ms works, 1 ms sometimes fails
-        # TODO BRC REMOVE THIS after figure how non-wake i2c an uart handle this
-        else:
-            print(f" \tOpen Question Does UART operation need more time to Enable features?")
 
         self._send_packet(_BNO_CHANNEL_CONTROL, set_feature_report)
 
@@ -1417,7 +1413,7 @@ class BNO08X:
         if not self._reset_pin:
             return
 
-        self._dbg("*** Hard Reset start...")
+        self._dbg("*** Hard Reset start (base class: spi, i2c)...")
         self._reset_pin.value(1)
         sleep_ms(10)
         self._reset_pin.value(0)
