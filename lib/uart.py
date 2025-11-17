@@ -146,7 +146,19 @@ class BNO08X_UART(BNO08X):
         self._read_into(self._data_buffer, start=4, end=packet_byte_count)
 
         data = self._uart.read(1)
+        if not data:
+            raise RuntimeError("Timeout while waiting for packet end")
+
         b = data[0]
+        
+        # Check for escape sequence
+        if b == 0x7D:
+            data = self._uart.read(1)
+            if not data:
+                raise RuntimeError("Timeout while waiting for escaped end byte")
+            b = data[0] ^ 0x20 # Un-escape the byte
+
+        # Now, check if the resulting byte is the packet end marker (0x7E)
         if b != 0x7E:
             raise RuntimeError("Didn't find packet end")
 
@@ -180,51 +192,8 @@ class BNO08X_UART(BNO08X):
             if packet.channel_number == 0x00:
                 break
 
-        # reset TX sequence numbers
-        self._tx_sequence_number = [0, 0, 0, 0, 0, 0]  # Reset ALL TX sequences to 0
+        # reset TX sequence numbers in base class
         self._dbg("End Soft RESET in uart.py")
-        
-# TODO LIKELY REWRITE
-# BNO_CHANNEL_EXE = const(1)
-# 
-#     def soft_reset(self) -> None:
-#         """Reset the sensor to an initial unconfigured state and wait for ready advertisement."""
-#         self._dbg("Start SOFT RESET...")
-# 
-#         # 1. Send the single-byte Host Reset command (value 1) on Channel 1 (BNO_CHANNEL_EXE)
-#         reset_command_data = bytearray([1])
-#         self._send_packet(BNO_CHANNEL_EXE, reset_command_data)
-# 
-#         # Allow time for the BNO08X to process the reset and reboot
-#         sleep_ms(500) 
-# 
-#         # 2. Read packets until the Channel 0 (Advertisement) packet is found
-#         while True:
-#             try:
-#                 packet = self._read_packet()
-#             except PacketError as e:
-#                 self._dbg(f"Error during soft reset read, clearing buffer and retrying: {e}")
-#                 self._uart.read(self._uart.any()) # Clear any remaining junk data
-#                 sleep_ms(200)
-#                 continue # Try reading again
-#             
-#             # Expected response flow:
-#             if packet.channel_number == BNO_CHANNEL_EXE: # Channel 1 (Reset Complete)
-#                 self._dbg("Found Channel 1: Reset Complete. Continuing to wait for Channel 0.")
-#                 # The reset is confirmed, continue reading the next packet
-#                 
-#             elif packet.channel_number == 0x00: # Channel 0 (Advertisement)
-#                 self._dbg("Found Channel 0: SHTP Advertisement. Soft Reset complete.")
-#                 # Reset TX sequence numbers after the device reboots
-#                 self._tx_sequence_number = [0, 0, 0, 0, 0, 0]
-#                 return # Exit successfully
-#                 
-#             else:
-#                 self._dbg(f"Ignoring unexpected channel: 0x{packet.channel_number:x}")
-# 
-#         # Note: A final timeout mechanism should be added around the while loop
-#         # for maximum robustness, but for typical operation, the above should suffice.
-        
         
 
     def hard_reset(self) -> None:
@@ -254,6 +223,5 @@ class BNO08X_UART(BNO08X):
                 sleep_ms(20)
                 continue  # Safely retry reading the packet
 
-        # reset TX sequence numbers
-        self._tx_sequence_number = [0, 0, 0, 0, 0, 0]  # Reset ALL TX sequences to 0
+        # reset TX sequence numbers in base class
         self._dbg("*** Hard Reset End in uart.py")
