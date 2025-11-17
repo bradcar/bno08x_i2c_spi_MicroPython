@@ -23,6 +23,7 @@ class BNO08X_I2C(BNO08X):
 
     def __init__(self, i2c_bus, address=_BNO08X_DEFAULT_ADDRESS, reset_pin=None, int_pin=None, debug=False):
         self._i2c = i2c_bus
+        _interface = "I2C"
         #todo should I do the following
         # self._reset = reset_pin
         # self._int = int_pin
@@ -30,7 +31,7 @@ class BNO08X_I2C(BNO08X):
         self._bno_i2c_addr = address if address is not None else _BNO08X_DEFAULT_ADDRESS
 
         # give the parent constructor (BNO08X.__init__), the right values from BNO08X_I2C
-        super().__init__(reset_pin=reset_pin, int_pin=int_pin, cs_pin=None, wake_pin=None, debug=debug)
+        super().__init__(_interface, reset_pin=reset_pin, int_pin=int_pin, cs_pin=None, wake_pin=None, debug=debug)
 
     # TODO
     def _send_packet(self, channel, data):

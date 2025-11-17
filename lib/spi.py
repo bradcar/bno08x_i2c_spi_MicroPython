@@ -51,6 +51,7 @@ class BNO08X_SPI(BNO08X):
         # BNO08X Datasheet (1.2.4.2 SPI) requires CPOL = 1 and CPHA = 1, which is: polarity=1 and phase=1
         self._spi = spi_bus
         self._spi.init(baudrate=baudrate, polarity=1, phase=1)
+        _interface = "SPI"
 
         self._reset = reset_pin
         self._int = int_pin
@@ -64,7 +65,7 @@ class BNO08X_SPI(BNO08X):
         except AttributeError:
             pass
 
-        super().__init__(reset_pin=reset_pin, int_pin=int_pin, cs_pin=cs_pin, wake_pin=wake_pin, debug=debug)
+        super().__init__(_interface, reset_pin=reset_pin, int_pin=int_pin, cs_pin=cs_pin, wake_pin=wake_pin, debug=debug)
 
     # TODO test soft_reset in base class
     # TODO should hard_reset be in base class?
