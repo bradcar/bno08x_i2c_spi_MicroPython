@@ -38,10 +38,10 @@ In UART mode, the BNO08X sends an advertisement message when it is ready to comm
 
 from struct import pack_into
 
-from utime import sleep_ms, sleep_us
+from utime import sleep_ms, sleep_us, ticks_ms, ticks_diff
 
 # Assuming bno08x.py and Packet/PacketError definitions are available
-from bno08x import BNO08X, Packet, PacketError, DATA_BUFFER_SIZE
+from bno08x import BNO08X, Packet, PacketError, DATA_BUFFER_SIZE, _elapsed_sec
 
 
 class BNO08X_UART(BNO08X):
@@ -212,16 +212,32 @@ class BNO08X_UART(BNO08X):
         self._reset_pin.value(1)
         sleep_ms(120)  # data sheet 6.5.3 Startup timing implies 94 ms needed
 
-        # read the SHTP announce command packet response
-        while True:
+        start_time = ticks_ms()
+        self._dbg("Process initial packets, until get Product ID report (0xf8)...")
+        
+        # Loop for a short period to process reports (like Timestamp or Command Response)
+        while _elapsed_sec(start_time) < 1.0: 
             try:
-                packet = self._read_packet()
-                if packet.channel_number == 0x00:
-                    break
-            except PacketError:
-                # Add a small delay to prevent rapid polling if the sensor is slow to respond.
-                sleep_ms(20)
-                continue  # Safely retry reading the packet
+                # Check for enough bytes for a header (4) to prevent blocking indefinitely
+                if not self._data_ready:
+                    sleep_ms(10)
+                    continue
 
-        # reset TX sequence numbers in base class
-        self._dbg("*** Hard Reset End in uart.py")
+                packet = self._read_packet() 
+                self._handle_packet(packet)
+                self._dbg(f"Read initial packet on Channel {packet.channel_number} (Seq {packet.sequence_number}).")
+
+            except (RuntimeError, PacketError):
+                # normal end-of-burst condition (timeout waiting for the next packet).
+                break 
+
+            except Exception as e:
+                self._dbg(f"Fatal error during initial packet reading: {e}. Exiting burst consumption.")
+                break
+
+        # Reset tx and rx sequence numbers, BNO08X initially sets sequence numbers to 0 after boot.
+        self._tx_sequence_number = [0, 0, 0, 0, 0, 0]
+        self._rx_sequence_number = [0, 0, 0, 0, 0, 0]
+        
+        self._dbg("*** Hard Reset End in uart.py, sequence numbers synchronized.")
+        # Control returns to bno08x.py:reset_sensor which calls _check_id()
