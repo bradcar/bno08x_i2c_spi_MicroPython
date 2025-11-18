@@ -983,52 +983,52 @@ class BNO08X:
         seq = new_packet.header.sequence_number
         self._rx_sequence_number[channel] = seq
 
-#     def _handle_packet(self, packet):
-#         """
-#         Split a single packet into multiple reports and process them in FIFO order.
-#         Handles multiple 0xF8 Product ID Response reports correctly.
-#         """
-#         # Use memoryview of the packet data once at the start, if it's not already one.
-#         data_view = memoryview(packet.data) 
-#         
-#         try:
-#             next_byte_index = 0
-#             slices = [] # Now holds (report_id, memoryview_slice) tuples
-# 
-#             while next_byte_index < packet.header.data_length:
-#                 report_id = packet.data[next_byte_index]
-#                 
-#                 if report_id < 0xF0:
-#                     required_bytes = _AVAIL_SENSOR_REPORTS[report_id][2]
-#                 else:
-#                     required_bytes = _REPORT_LENGTHS.get(report_id, 0)
-#                     if required_bytes == 0:
-#                         self._dbg(f"Unknown report_id {hex(report_id)}, skipping 1 byte")
-#                         next_byte_index += 1
-#                         continue
-# 
-#                 unprocessed_byte_count = packet.header.data_length - next_byte_index
-#                 if unprocessed_byte_count < required_bytes:
-#                     self._dbg(f"Unprocessable batch ERROR: skipping ! {unprocessed_byte_count} bytes")
-#                     break
-# 
-#                 # CRITICAL CHANGE: Create a memoryview slice (no data copy)
-#                 report_view = data_view[next_byte_index: next_byte_index + required_bytes]
-#                 
-#                 # Append (report_id, memoryview_slice)
-#                 slices.append([report_view[0], report_view]) 
-#                 next_byte_index += required_bytes
-# 
-#             self._dbg(f"HANDLING {len(slices)} PACKET{'S' if len(slices) > 1 else ''}...")
-#             # Process in FIFO order
-#             for report_id, report_bytes in slices:
-#                 self._dbg("")
-#                 # report_bytes is now a memoryview, which is compatible with unpack_from
-#                 self._process_report(report_id, report_bytes)
-# 
-#         except Exception as error:
-#             self._dbg(f"Handle Packet: Packet bytes:{[hex(b) for b in packet.data[:4]]}...")
-#             raise
+    #     def _handle_packet(self, packet):
+    #         """
+    #         Split a single packet into multiple reports and process them in FIFO order.
+    #         Handles multiple 0xF8 Product ID Response reports correctly.
+    #         """
+    #         # Use memoryview of the packet data once at the start, if it's not already one.
+    #         data_view = memoryview(packet.data)
+    #
+    #         try:
+    #             next_byte_index = 0
+    #             slices = [] # Now holds (report_id, memoryview_slice) tuples
+    #
+    #             while next_byte_index < packet.header.data_length:
+    #                 report_id = packet.data[next_byte_index]
+    #
+    #                 if report_id < 0xF0:
+    #                     required_bytes = _AVAIL_SENSOR_REPORTS[report_id][2]
+    #                 else:
+    #                     required_bytes = _REPORT_LENGTHS.get(report_id, 0)
+    #                     if required_bytes == 0:
+    #                         self._dbg(f"Unknown report_id {hex(report_id)}, skipping 1 byte")
+    #                         next_byte_index += 1
+    #                         continue
+    #
+    #                 unprocessed_byte_count = packet.header.data_length - next_byte_index
+    #                 if unprocessed_byte_count < required_bytes:
+    #                     self._dbg(f"Unprocessable batch ERROR: skipping ! {unprocessed_byte_count} bytes")
+    #                     break
+    #
+    #                 # CRITICAL CHANGE: Create a memoryview slice (no data copy)
+    #                 report_view = data_view[next_byte_index: next_byte_index + required_bytes]
+    #
+    #                 # Append (report_id, memoryview_slice)
+    #                 slices.append([report_view[0], report_view])
+    #                 next_byte_index += required_bytes
+    #
+    #             self._dbg(f"HANDLING {len(slices)} PACKET{'S' if len(slices) > 1 else ''}...")
+    #             # Process in FIFO order
+    #             for report_id, report_bytes in slices:
+    #                 self._dbg("")
+    #                 # report_bytes is now a memoryview, which is compatible with unpack_from
+    #                 self._process_report(report_id, report_bytes)
+    #
+    #         except Exception as error:
+    #             self._dbg(f"Handle Packet: Packet bytes:{[hex(b) for b in packet.data[:4]]}...")
+    #             raise
 
     def _handle_packet(self, packet):
         """
@@ -1071,7 +1071,7 @@ class BNO08X:
             self._dbg(f"HANDLING {report_count} PACKET{'S' if report_count > 1 else ''}...")
 
         except Exception as error:
-            dbg(f"Handle Packet: Packet bytes:{[hex(b) for b in packet.data[:4]]}...")
+            self._dbg(f"Handle Packet: Packet bytes:{[hex(b) for b in packet.data[:4]]}...")
             raise
 
     def _handle_control_report(self, report_id: int, report_bytes: bytearray) -> None:
