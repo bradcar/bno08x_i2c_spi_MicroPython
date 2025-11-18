@@ -39,6 +39,15 @@ TODO: BRC add TARE
 # Calibrated Acceleration (m/s^2)
 # Euler Angles (in degrees?)
 # CALIBRATION
+
+#
+Delay
+1. When the timebase reference report is provided with individual sensor report
+   it will likely have a delay of zero.
+2. In cases where sensor reports are concatenated (due to delays in processing),
+   the delay field may be populated, then delay and the timebase reference
+   are used to calculate the sensor sample's actual timestamp.
+
 """
 
 __version__ = "0.1"
@@ -48,8 +57,9 @@ from math import asin, atan2, degrees
 from struct import pack_into, unpack_from
 
 from collections import namedtuple
+from machine import Pin
 from micropython import const
-from utime import ticks_ms, ticks_diff, sleep_ms
+from utime import ticks_us, ticks_ms, ticks_diff, sleep_ms
 
 # import support files
 from debug import channels, reports
@@ -382,27 +392,11 @@ def _parse_sensor_report_data(report_bytes: bytearray) -> tuple[tuple, int]:
     return scaled_data, accuracy, delay_us
 
 
-def _report_length(report_id: int) -> int:
-    if report_id < 0xF0:  # it's a sensor report
-        return _AVAIL_SENSOR_REPORTS[report_id][2]
-
-    return _REPORT_LENGTHS[report_id]
-
-
 # Set Feature Command (0xfd) - host to sensor in SH-2 (6.5.4)
 # report_id (B), feature_report_id(B), feature_flags (B), change_sensitivity(H),
 # report_interval (I), batch_interval_word (I), sensor_specific_configuration_word (I)
 def _parse_get_feature_response_report(report_bytes: bytearray):
     return unpack_from("<BBBHIII", report_bytes)
-
-
-def _parse_timestamp(buffer: bytearray) -> tuple[int, ...]:
-    """Parse the timestamp unit is 100usec tics
-        return usecs
-    """
-    if not (buffer[0] == _BASE_TIMESTAMP or buffer[0] == _TIMESTAMP_REBASE):
-        raise AttributeError(f"Wrong report id Timestamp Base or Rebase: {hex(buffer[0])}")
-    return unpack_from("<I", buffer, 1)[0] * 100
 
 
 def _parse_sensor_id(buffer: bytearray) -> tuple[int, ...]:
@@ -453,27 +447,6 @@ def _insert_command_request_report(
 
     for idx, param in enumerate(command_params):
         buffer[3 + idx] = param
-
-
-def _separate_batch(packet, report_slices):
-    # get first report id, loop up its report length
-    # read that many bytes, parse them
-    next_byte_index = 0
-    while next_byte_index < packet.header.data_length:
-        report_id = packet.data[next_byte_index]
-        required_bytes = _report_length(report_id)
-
-        unprocessed_byte_count = packet.header.data_length - next_byte_index
-
-        # handle incomplete remainder
-        if unprocessed_byte_count < required_bytes:
-            raise RuntimeError("Unprocessable Batch bytes", unprocessed_byte_count)
-        # we have enough bytes to read
-        # add a slice to the list that was passed in
-        report_slice = packet.data[next_byte_index: next_byte_index + required_bytes]
-
-        report_slices.append([report_slice[0], report_slice])
-        next_byte_index = next_byte_index + required_bytes
 
 
 class Packet:
@@ -574,8 +547,9 @@ class BNO08X:
         self._data_buffer_memoryview = memoryview(self._data_buffer)
         self._command_buffer: bytearray = bytearray(12)
         self._packet_slices = []
-        self._timestamp_us = 0
-        self._rebase_us = 0
+        self.last_interrupt_us = 0
+        self.prev_interrupt_us = 0
+        self._last_base_timestamp_us = 0
 
         # track sequence numbers one per channel, one per direction
         # RX(inbound, last seen/expected) and TX(outbound) sequence numbers 
@@ -598,6 +572,17 @@ class BNO08X:
         self.reset_sensor()
         self._dbg("********** End __init__ *************\n")
         self._dbg(f"Interface is {_interface}\n")
+
+        # Active-low interrupt → falling edge
+        self._int_pin.irq(trigger=Pin.IRQ_FALLING, handler=self._on_interrupt)
+
+    def _on_interrupt(self, pin):
+        """
+        Interrupt handler for active-low H_INTN (int_pin).
+        Captures the exact host timestamp (microseconds).
+        """
+        self.prev_interrupt_us = self.last_interrupt_us
+        self.last_interrupt_us = ticks_us()
 
     def reset_sensor(self):
         if self._reset_pin:
@@ -1083,14 +1068,14 @@ class BNO08X:
         """
         # Base Timestamp (0xfb)
         if report_id == _BASE_TIMESTAMP:
-            self._timestamp_us = _parse_timestamp(report_bytes)
-            self._dbg(f"Base Timestamp (0xfb): {self._timestamp_us} usec")
+            self._last_base_timestamp_us = unpack_from("<I", report_bytes, 1)[0] * 100
+            self._dbg(f"Base Timestamp (0xfb): {self._last_base_timestamp_us} usec")
             return
 
-        # Timestamp Rebase (0xfa)
+            # Timestamp Rebase (0xfa), see this when _BASE_TIMESTAMP wraps so use this instead
         if report_id == _TIMESTAMP_REBASE:
-            self._rebase_us = _parse_timestamp(report_bytes)
-            self._dbg(f"Timestamp Rebase (0xfa): {self._rebase_us} usec")
+            self._last_base_timestamp_us = unpack_from("<I", report_bytes, 1)[0] * 100
+            self._dbg(f"Timestamp Rebase (0xfa): {self._last_base_timestamp_us} usec")
             return
 
         # Feature response (0xfc)
@@ -1160,10 +1145,15 @@ class BNO08X:
             sensor_data, accuracy, delay_us = _parse_sensor_report_data(report_bytes)
             self._dbg(f"Report: {reports[report_id]}\nData: {sensor_data}, {accuracy=}, {delay_us=}")
 
+            self._sensor_timestamp_us = self.last_interrupt_us - self._last_base_timestamp_us + delay_us
+            print(
+                f"sensor timestamp={self._sensor_timestamp_us} {(self.last_interrupt_us - self.prev_interrupt_us) / 1000.0} ms ")
+
             if report_id == BNO_REPORT_MAGNETOMETER:
-                # TODO: BRC only magnetic accuracy can be user visible, but all reports have accuracy
+                # TODO: BRC now only magnetic accuracy is user visible, but all reports have accuracy
                 self._magnetometer_accuracy = accuracy
 
+            # TODO BRC: return full_tuple = sensor_data + (accuracy, delay_us)
             self._report_values[report_id] = sensor_data
             return
 
@@ -1233,6 +1223,8 @@ class BNO08X:
         # TODO fix for ARVR 5-tuple for  ARVR-Stabilized Rotation Vector (0x28)
         sensor_data, accuracy, delay_us = _parse_sensor_report_data(report_bytes)
         self._dbg(f"Report: {reports[report_id]}\nData: {sensor_data}, {accuracy=}, {delay_us=}")
+
+        self._sensor_timestamp = self.last_interrupt_us - self._last_base_timestamp_us + delay_us
 
         if report_id == BNO_REPORT_MAGNETOMETER:
             # TODO: BRC only magnetic accuracy can be user visible, but all reports have accuracy
@@ -1391,11 +1383,6 @@ class BNO08X:
         if self._debug:
             print("DBG::\t\t", *args, **kwargs)
 
-    def _get_data(self, index: int, fmt_string: str):
-        # index arg is not including header, so add 4 into data buffer
-        data_index = index + 4
-        return unpack_from(fmt_string, self._data_buffer, data_index)[0]
-
     @property
     def _data_ready(self) -> None:
         raise RuntimeError("Not implemented")
@@ -1439,6 +1426,7 @@ class BNO08X:
     def _read_packet(self):
         raise RuntimeError("_read_packet Not implemented in bno08x.py, supplanted by I2C or SPI subclass")
 
+    # TODO change these to using self._tx_sequence_number, likely better to put into methods that use them
     def _increment_report_seq(self, report_id: int) -> None:
         current = self._two_ended_sequence_numbers.get(report_id, 0)
         self._two_ended_sequence_numbers[report_id] = (current + 1) % 256
