@@ -36,8 +36,8 @@ Required for I2C (see SPI and UART below):
 Optional for I2C:
 - reset_pin : used by I2C for hardware reset, if not defined uses soft reset. It is a Pin object, not number
 
-PS0/Wake and PS1 are used to select I2C, therefore I2C can not use wake pin.
-In order to use I2C, PS1 can not have solder blob so it is tied to ground and PS0/WAKE can not have solder blob so it is tied to ground.
+PS0(Wake_pin) and PS1 are used to select I2C, therefore I2C can not use wake pin.
+In order to use I2C, PS1 can not have solder blob so it is tied to ground and PS0(Wake_pin) can not have solder blob so it is tied to ground.
 
 Optional
 - debug : print very detailed logs, mainly for debugging driver.
@@ -154,11 +154,11 @@ Requirements to using Sparkfun BNO086 with SPI
 3. UART MUST be set to baudrate=3000000
 
 In order to use SPI on most sensor boards instead of I2C you must often have to add ONE solder blob on PS1. 
-On the back side of Sparkfun BNO086 and Adafruit BNO085, one needs a solder blob to bridge PS1.
-PS0 must be connected to a GPIO so it can be pulsed low to serve as the SPI's WAKE functionality can be performed.
-Ceva specifies that PS0 and PS1 must be high during SPI operation, but PS0 is set low and then high in driver to wake bno08x.
+On the back side of Sparkfun BNO086 and Adafruit BNO085, one needs a solder blob to bridge PS1 which will set PS1 high for SPI operation. 
+The PS0(Wake_pin) is connect to a gpio.
+This driver will used the wake-pin after reset as a ‘wake’ signal taking the BNO08X out of sleep for communication with the BNO08X.
 
-If you put a solder blob on both PS0 and PS1, this driver is likely to hang.
+Do not put a solder blog on PS0, it must be connected to a wake_pin.
 
     from machine import SPI, Pin
     from spi import BNO08X_SPI
@@ -176,8 +176,8 @@ If you put a solder blob on both PS0 and PS1, this driver is likely to hang.
     bno = BNO08X_SPI(spi, cs, int_pin, reset_pin, wake_pin, debug=False)
 
 Required for SPI
-- int_pin : required by SPI for accurate sensor timestamps. Define a Pin object, not  number.
-- wake_pin : Needed by SPI to operate correctly.
+- int_pin : Required by SPI for accurate sensor timestamps. Define a Pin object, not  number.
+- wake_pin : Required by SPI to operate correctly.
 Optional for SPI
 - reset_pin : used by SPI for hardware reset, if not defined uses soft reset. It is a Pin object, not number
 
@@ -191,13 +191,11 @@ Required for I2C (see SPI and UART below):
 Optional for I2c:
 - reset_pin : used by I2C for hardware reset, if not defined uses soft reset. It is a Pin object, not number
 
-PS0 and PS1 are used to select UART, therefore UART can not use wake pin.  In order to use UART, PS1 must be high (solder blob) and PS0/WAKE not have solder blob so it is tied to ground.
-
  1. BNO08x SDA to board UARTx-RX (uart 1 ex: gpio9, uart 0 ex: gpio13)
  2. BNO08x SCL to board UARTx-TX (uart 1 ex: gbio8, uart 0 ex: gpio12)
 3. todo ? INT Pin is required for accurate communication
 
-PS0 and PS1 are the host interface protocol selection pins, therefore UART can not use wake pin.  In order to use UART, PS1 must be high (solder blob) and PS0/WAKE not have solder blob so it is tied to ground.
+PS0 and PS1 are the host interface protocol selection pins, therefore UART can not use a wake pin.  In order to use UART, PS1 must be high (solder blob) and PS0/WAKE not have solder blob so it is tied to ground.
 
 1. must clear i2c jumper when using SPI or UART (https://docs.sparkfun.com/SparkFun_VR_IMU_Breakout_BNO086_QWIIC/assets/board_files/SparkFun_VR_IMU_Breakout_BNO086_QWIIC_Schematic_v10.pdf)
 2. must have solder blob ONLY on SP1, must NOT have Wake pin connect to a pin.
