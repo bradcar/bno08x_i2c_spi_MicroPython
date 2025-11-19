@@ -56,10 +56,11 @@ __repo__ = "https://github.com/bradcar/bno08x_i2c_spi_MicroPython"
 from math import asin, atan2, degrees
 from struct import pack_into, unpack_from
 
+import uctypes
 from collections import namedtuple
 from machine import Pin
 from micropython import const
-from utime import ticks_us, ticks_ms, ticks_diff, sleep_ms
+from utime import ticks_us, ticks_ms, ticks_diff, sleep_ms, sleep_us
 
 # import support files
 from debug import channels, reports
@@ -293,9 +294,27 @@ _AVAIL_SENSOR_REPORTS = {
     BNO_REPORT_RAW_MAGNETOMETER: (1, 3, 16),
     BNO_REPORT_UNCALIBRATED_GYROSCOPE: (_Q_POINT_9_SCALAR, 3, 10),  # For testing
     BNO_REPORT_UNCALIBRATED_MAGNETOMETER: (_Q_POINT_4_SCALAR, 3, 10),  # For testing
-    BNO_REPORT_ARVR_STABILIZED_ROTATION_VECTOR: (_Q_POINT_14_SCALAR, 4, 12),  # For testing
+    BNO_REPORT_ARVR_STABILIZED_ROTATION_VECTOR: (_Q_POINT_14_SCALAR, 5, 14),  # For testing
     BNO_REPORT_ARVR_STABILIZED_GAME_ROTATION_VECTOR: (_Q_POINT_14_SCALAR, 4, 12),  # For testing
     BNO_REPORT_GYRO_INTEGRATED_ROTATION_VECTOR: (_Q_POINT_14_SCALAR, 4, 12),  # For testing
+}
+
+# C-style layout for all standard 16-bit BNO08x sensor reports
+# Offsets follow the BNO08x standard header structure
+_SENSOR_REPORT_LAYOUT = {
+    "report_id": 0 | uctypes.UINT8,  # byte 0
+    "status": 1 | uctypes.UINT8,  # byte 1
+
+    # byte2 contains accuracy+delay high bits
+    "byte2": 2 | uctypes.UINT8,  # byte 2
+    "byte3": 3 | uctypes.UINT8,  # byte 3 (delay low bits)
+
+    # 16-bit signed values (x,y,z or i,j,k,r)
+    "v1": 4 | uctypes.INT16,
+    "v2": 6 | uctypes.INT16,
+    "v3": 8 | uctypes.INT16,
+    "v4": 10 | uctypes.INT16,  # only valid for quaternion reports
+    "a1": 12 | uctypes.INT16,  # only valid for quaternion ARVR rotation report
 }
 
 _INITIAL_REPORTS = {
@@ -313,14 +332,16 @@ _INITIAL_REPORTS = {
         "In-Vehicle": -1,
     },
     BNO_REPORT_STABILITY_CLASSIFIER: "Unknown",
-    BNO_REPORT_ROTATION_VECTOR: (0.0, 0.0, 0.0, 0.0),
-    BNO_REPORT_GAME_ROTATION_VECTOR: (0.0, 0.0, 0.0, 0.0),
-    BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR: (0.0, 0.0, 0.0, 0.0),
+    BNO_REPORT_ROTATION_VECTOR: (0.0, 0.0, 0.0, 0.0, 0, 0),
+    BNO_REPORT_GAME_ROTATION_VECTOR: (0.0, 0.0, 0.0, 0.0, 0, 0),
+    BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR: (0.0, 0.0, 0.0, 0.0, 0, 0),
     # Gyro is a 5 tuple, Celsius float and int timestamp for last two entry
-    BNO_REPORT_RAW_GYROSCOPE: (0, 0, 0, 0.0, 0),
+    BNO_REPORT_RAW_GYROSCOPE: (0, 0, 0, 0.0, 0, 0, 0),
     # Acc & Mag are 4-tuple, int timestamp for last entry
-    BNO_REPORT_RAW_ACCELEROMETER: (0, 0, 0, 0),
-    BNO_REPORT_RAW_MAGNETOMETER: (0, 0, 0, 0),
+    BNO_REPORT_RAW_ACCELEROMETER: (0, 0, 0, 0, 0, 0),
+    BNO_REPORT_RAW_MAGNETOMETER: (0, 0, 0, 0, 0, 0),
+    BNO_REPORT_ARVR_STABILIZED_ROTATION_VECTOR: (0.0, 0.0, 0.0, 0.0, 0.0, 0, 0),
+    BNO_REPORT_ARVR_STABILIZED_GAME_ROTATION_VECTOR: (0.0, 0.0, 0.0, 0.0, 0, 0),
     BNO_REPORT_STEP_COUNTER: 0,
 }
 
@@ -365,29 +386,47 @@ def _elapsed_sec(start_time):
 ############ REPORT PARSING ###########################
 def _parse_sensor_report_data(report_bytes: bytearray) -> tuple[tuple, int]:
     """
-    Parses reports with only 16-bit fields('h'), sensor data starts at offset=4
-    parses standard 3-tuple vectors and 4-tuple quaternions
+    Fast uctypes-based parser for standard BNO08x sensor reports, sensor data starts at offset=4
+    Parses 3-tuple vectors, 4-tuple quaternions, and 5-tuple ARVR rotation.
     """
-    report_id = report_bytes[0]
-    scalar, count, _report_length = _AVAIL_SENSOR_REPORTS[report_id]
+    # Create a struct overlay on top of the raw buffer
+    s = uctypes.struct(uctypes.addressof(report_bytes), _SENSOR_REPORT_LAYOUT, uctypes.LITTLE_ENDIAN)
 
-    byte2 = report_bytes[2]
-    byte3 = report_bytes[3]
-    accuracy = byte2 & 0x03
+    report_id = s.report_id
+    scalar, count, _ = _AVAIL_SENSOR_REPORTS[report_id]
 
-    # Extract delay 
-    delay_upper = (byte2 >> 2) & 0x3F
-    delay_raw = (delay_upper << 8) | byte3
+    # Extract accuracy from byte2 low bits
+    accuracy = s.byte2 & 0x03
+
+    # Extract delay (14 bits)
+    delay_upper = (s.byte2 >> 2) & 0x3F
+    delay_raw = (delay_upper << 8) | s.byte3
     delay_us = delay_raw * 100
 
+    # Read & scale sensor fields using uctypes INT16 fields
     if count == 3:
-        x, y, z = unpack_from('<hhh', report_bytes, 4)
-        scaled_data = (x * scalar, y * scalar, z * scalar)
+        scaled_data = (
+            s.v1 * scalar,
+            s.v2 * scalar,
+            s.v3 * scalar,
+        )
     elif count == 4:
-        i, j, k, r = unpack_from('<hhhh', report_bytes, 4)
-        scaled_data = (i * scalar, j * scalar, k * scalar, r * scalar)
+        scaled_data = (
+            s.v1 * scalar,
+            s.v2 * scalar,
+            s.v3 * scalar,
+            s.v4 * scalar,
+        )
+    elif count == 5:
+        scaled_data = (
+            s.v1 * scalar,
+            s.v2 * scalar,
+            s.v3 * scalar,
+            s.v4 * scalar,
+            s.a1,
+        )
     else:
-        raise ValueError(f"Unexpected data field count ({count}) for report ID {hex(report_id)}")
+        raise ValueError(f"Unexpected tuple length {count}")
 
     return scaled_data, accuracy, delay_us
 
@@ -463,10 +502,7 @@ class Packet:
         outstr += "DBG::\t\tHeader:\n"
         outstr += f"DBG::\t\t Data Len: {self.header.data_length}\n"
         outstr += f"DBG::\t\t Channel: {channels[self.channel_number]} ({self.channel_number})\n"
-        if self.channel_number in {
-            _BNO_CHANNEL_CONTROL,
-            _BNO_CHANNEL_INPUT_SENSOR_REPORTS,
-        }:
+        if self.channel_number in {_BNO_CHANNEL_CONTROL, _BNO_CHANNEL_INPUT_SENSOR_REPORTS, }:
             if self.report_id in reports:
                 outstr += f"DBG::\t\t Report Type: {reports[self.report_id]} ({hex(self.report_id)})\n"
 
@@ -552,7 +588,7 @@ class BNO08X:
         self._last_base_timestamp_us = 0
 
         # track sequence numbers one per channel, one per direction
-        # RX(inbound, last seen/expected) and TX(outbound) sequence numbers 
+        # RX(inbound, last seen/expected) and TX(outbound) sequence numbers
         self._rx_sequence_number: list[int] = [0, 0, 0, 0, 0, 0]
         self._tx_sequence_number: list[int] = [0, 0, 0, 0, 0, 0]
 
@@ -648,7 +684,7 @@ class BNO08X:
         t4 = +1.0 - 2.0 * (jsqr + q[2] * q[2])
         yaw = degrees(atan2(t3, t4))
 
-        return roll, tilt, yaw
+        return roll, tilt, yaw, q[4], q[5]
 
     @property
     def geomagnetic_quaternion(self):
@@ -1082,7 +1118,7 @@ class BNO08X:
         if report_id == _GET_FEATURE_RESPONSE:
             get_feature_report = _parse_get_feature_response_report(report_bytes)
             _report_id, feature_report_id, *_remainder = get_feature_report
-            self._report_values[feature_report_id] = _INITIAL_REPORTS.get(feature_report_id, (0.0, 0.0, 0.0))
+            self._report_values[feature_report_id] = _INITIAL_REPORTS.get(feature_report_id, (0.0, 0.0, 0.0, 0, 0))
             return
 
         # Command Response (0xF1)
@@ -1092,17 +1128,21 @@ class BNO08X:
 
         # Product ID Response (0xf8)
         if report_id == _SHTP_REPORT_PRODUCT_ID_RESPONSE:
-            (reset_cause, sw_part_number, sw_major, sw_minor, sw_patch, sw_build_number,) = _parse_sensor_id(
-                report_bytes)
+            reset_cause = report_bytes[1]
+            sw_major = report_bytes[2]
+            sw_minor = report_bytes[3]
+            sw_part_number = unpack_from("<I", report_bytes, 4)[0]
+            sw_build_number = unpack_from("<I", report_bytes, 8)[0]
+            sw_patch = unpack_from("<H", report_bytes, 12)[0]
+
             self._dbg("Product ID Response (0xf8):")
             self._dbg(f"*** Last reset cause: {reset_cause} = {_RESET_CAUSE_STRING[reset_cause]}")
             self._dbg(f"*** Part Number: {sw_part_number}")
             self._dbg(f"*** Software Version: {sw_major}.{sw_minor}.{sw_patch}")
-            self._dbg(f"\tBuild: {sw_build_number}")
+            self._dbg(f"\tBuild: {sw_build_number}\n")
+
             self._id_read = True
             return
-
-        self._dbg(f"Received unexpected control report ID: {hex(report_id)}")
 
     def _handle_command_response(self, report_bytes: bytearray) -> None:
         (report_body, response_values) = _parse_command_response(report_bytes)
@@ -1133,30 +1173,29 @@ class BNO08X:
     def _process_report(self, report_id: int, report_bytes: bytearray) -> None:
         """
         Process reports both sensor and control reports
-        TODO: BRC determine how to expose accuracy and delay to users
         TODO: BRC handle ARVR 5 tuple at end
-        
-        Extracted accuracy and delay from each report (100usec ticks)
+
+        Extracted accuracy and delay from sensor report (100usec ticks)
         Multiple reports are processed in the order they appear in the packet buffer.
         Last sensor report's value over-write previous in this packet.
         The first (oldest) report sets self._report_values[report_id],
         """
+        # handle typical sensor reports first
         if 0x01 <= report_id <= 0x09:
             sensor_data, accuracy, delay_us = _parse_sensor_report_data(report_bytes)
             self._dbg(f"Report: {reports[report_id]}\nData: {sensor_data}, {accuracy=}, {delay_us=}")
 
-            self._sensor_timestamp_us = self.last_interrupt_us - self._last_base_timestamp_us + delay_us
+            self._sensor_us = self.last_interrupt_us - self._last_base_timestamp_us + delay_us
             print(
-                f"sensor timestamp={self._sensor_timestamp_us} {(self.last_interrupt_us - self.prev_interrupt_us) / 1000.0} ms ")
+                f"sensor timestamp={self._sensor_us} {(self.last_interrupt_us - self.prev_interrupt_us) / 1000.0} ms")
 
             if report_id == BNO_REPORT_MAGNETOMETER:
-                # TODO: BRC now only magnetic accuracy is user visible, but all reports have accuracy
                 self._magnetometer_accuracy = accuracy
 
-            # TODO BRC: return full_tuple = sensor_data + (accuracy, delay_us)
-            self._report_values[report_id] = sensor_data
+            self._report_values[report_id] = sensor_data + (accuracy, self._sensor_us)
             return
 
+        # Handle all control reports
         if report_id >= 0xF0:
             self._handle_control_report(report_id, report_bytes)
             return
@@ -1170,7 +1209,7 @@ class BNO08X:
             shake_bitfield = unpack_from("<H", report_bytes, 4)[0]
             shake_detected = (shake_bitfield & 0x07) != 0
 
-            # Latch shake in _readings 
+            # Latch shake in _readings
             if shake_detected:
                 previous = self._report_values.get(BNO_REPORT_SHAKE_DETECTOR, False)
                 self._report_values[BNO_REPORT_SHAKE_DETECTOR] = True
@@ -1218,17 +1257,12 @@ class BNO08X:
             self._report_values[report_id] = sensor_data
             return
 
-        # General Case all other sensors, but the only two left are AVAR, is this  right TODO BRC??
-        # sensor_data is a 3-tuple or 4-tuple, 
-        # TODO fix for ARVR 5-tuple for  ARVR-Stabilized Rotation Vector (0x28)
+        # General Case all other sensors
+        # TODO fix for ARVR 4-tuple and ARVR 5-tuple for ARVR-Stabilized Rotation Vector (0x28)
         sensor_data, accuracy, delay_us = _parse_sensor_report_data(report_bytes)
         self._dbg(f"Report: {reports[report_id]}\nData: {sensor_data}, {accuracy=}, {delay_us=}")
 
         self._sensor_timestamp = self.last_interrupt_us - self._last_base_timestamp_us + delay_us
-
-        if report_id == BNO_REPORT_MAGNETOMETER:
-            # TODO: BRC only magnetic accuracy can be user visible, but all reports have accuracy
-            self._magnetometer_accuracy = accuracy
 
         self._report_values[report_id] = sensor_data
         return
@@ -1236,12 +1270,11 @@ class BNO08X:
     # Enable a given feature of the BNO08x (See Hillcrest 6.5.4)
     def enable_feature(self, feature_id, freq=None):
         """
-        Enable Features the bno08x is to return.
+        Enable sensor features the bno08x returns/
         Called recursively since some raw require non-raw to be enabled
 
-        send _SET_FEATURE_COMMAND (0xfb) with feature id
+        On Channel (0x02), send _SET_FEATURE_COMMAND (0xfb) with feature id
         await GET_FEATURE_RESPONSE (0xfc)
-        both are on Channel (0x02)
         """
         self._dbg(f"ENABLING FEATURE ID... {hex(feature_id)}")
 
@@ -1285,7 +1318,7 @@ class BNO08X:
             # report_interval (I), batch_interval_word (I), sensor_specific_configuration_word (I)
             _, fid, _, _, report_interval, _, _ = _parse_get_feature_response_report(report_bytes.data)
 
-            self._report_values[feature_id] = _INITIAL_REPORTS.get(feature_id, (0.0, 0.0, 0.0))
+            self._report_values[feature_id] = _INITIAL_REPORTS.get(feature_id, (0.0, 0.0, 0.0, 0, 0))
             self._report_periods_dictionary_us[feature_id] = report_interval
             self._dbg(f"Report enabled: {_REPORTS_DICTIONARY[fid]}: {hex(fid)}")
             self._dbg(f" Initial tuple={self._report_values}")
@@ -1296,7 +1329,6 @@ class BNO08X:
         except RuntimeError:
             raise RuntimeError(f"BNO08X: enable_feature: not able to enable feature: {feature_id}")
 
-    # TODO document this for user, put in test code
     def report_period_us(self, feature_id):
         """
         return
@@ -1396,7 +1428,7 @@ class BNO08X:
         self._reset_pin.value(1)
         sleep_ms(10)
         self._reset_pin.value(0)
-        sleep_ms(10)  # TODO try sleep_us(1), data sheet say only 10ns required,
+        sleep_us(10)  # sleep_us(1), data sheet say only 10ns required,
         self._reset_pin.value(1)
         sleep_ms(200)  # orig was 10ms, datasheet implies 94 ms required
         self._dbg("*** Hard Reset End, awaiting Acknowledgement")
