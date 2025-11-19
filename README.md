@@ -7,7 +7,7 @@
 
 ## Library tested
 
-bno08x MicroPython driver for i2c, spi, uart on MicroPython
+bno08x MicroPython driver for I2C, SPI, UART on MicroPython
 
 This library has been tested with BNO086 sensor. It should work with BNO080 and BNO085 sensors. It has been tested with Raspberry Pico 2 W
 
@@ -27,14 +27,17 @@ This library has been tested with BNO086 sensor. It should work with BNO080 and 
 - 
 - address : if using 2 BNO08x each needs a separate address (depending on board, add solder jump or cut wire).
 
-Optional parameters: 
+Optional parameters:
 
-    bno = BNO08X_I2C(i2c0, address=0x4b, reset_pin=Pin(12), int_pin=Pin(13), wake_pin=Pin(21), debug=False)
+    bno = BNO08X_I2C(i2c0, address=0x4b, reset_pin=Pin(12), int_pin=Pin(13), debug=False)
 
-Required by SPI
-- reset_pin : Needed by SPI to operate correctly. This is also used to enable sensor hard reset (Pin object, not number). If not defined, a soft reset is used.
-- int_pin : Needed by SPI to operate correctly. Also used to synchronize sensor time with host to enable microsecond accuracy timestamps. Define a Pin object. Not required if only 200-millisecond host-based timestamps are adequate, or if timestamps are not required.
-- wake_pin : Needed by SPI to operate correctly. 
+Required for I2C (see SPI and UART below):
+- int_pin : required by I2C for accurate sensor timestamps. Define a Pin object, not  number.
+Optional for I2C:
+- reset_pin : used by I2C for hardware reset, if not defined uses soft reset. It is a Pin object, not number
+
+PS0/Wake and PS1 are used to select I2C, therefore I2C can not use wake pin.
+In order to use I2C, PS1 can not have solder blob so it is tied to ground and PS0/WAKE can not have solder blob so it is tied to ground.
 
 Optional
 - debug : print very detailed logs, mainly for debugging driver.
@@ -172,10 +175,23 @@ If you put a solder blob on both PS0 and PS1, this driver is likely to hang.
 
     bno = BNO08X_SPI(spi, cs, int_pin, reset_pin, wake_pin, debug=False)
 
+Required for SPI
+- int_pin : required by SPI for accurate sensor timestamps. Define a Pin object, not  number.
+- wake_pin : Needed by SPI to operate correctly.
+Optional for SPI
+- reset_pin : used by SPI for hardware reset, if not defined uses soft reset. It is a Pin object, not number
+
 ## UART Setup
 UART wires are in some sense opposite of i2c wires (double check your wiring).
 uart = UART(1, baudrate=3_000_000, tx=Pin(8), rx=Pin(9), timeout=2000)
 uart = UART(0, baudrate=3_000_000, tx=Pin(12), rx=Pin(13), timeout=2000)
+
+Required for I2C (see SPI and UART below):
+- int_pin : required by I2C for accurate sensor timestamps. Define a Pin object, not  number.
+Optional for I2c:
+- reset_pin : used by I2C for hardware reset, if not defined uses soft reset. It is a Pin object, not number
+
+PS0 and PS1 are used to select UART, therefore UART can not use wake pin.  In order to use UART, PS1 must be high (solder blob) and PS0/WAKE not have solder blob so it is tied to ground.
 
  1. BNO08x SDA to board UARTx-RX (uart 1 ex: gpio9, uart 0 ex: gpio13)
  2. BNO08x SCL to board UARTx-TX (uart 1 ex: gbio8, uart 0 ex: gpio12)
@@ -194,17 +210,20 @@ This is a very different protocol and not supported in my driver. Take a look at
 ## Report Maximum Frequencioes
 
 | **Feature**             | **Max Frequency (Hz)** | **msec/Report** | **period we've seen** |
-|-------------------------|------------------------|-----------------|---------------------|
-| Composite Gyro Rotation | 1000                   | 1.0 ms          | 1 ms                |
-| Accelerometer           | 500                    | 2.0 ms          | 4, 8, 16, 32, 64... |
-| Rotation Vector         | 400                    | 2.5 ms          |                     |
-| Gaming Rotation         | 400                    | 2.5 ms          |                     |
-| Gravity                 | 400                    | 2.5 ms          |                     |
-| Linear Acceleration     | 400                    | 2.5 ms          |                     |
-| Gyroscope               | 400                    | 2.5 ms          |                     |
-| Magnetometer            | 100                    | 10.0 ms         |                     |
-| Geomagnetic Rotation    | 90                     | 11.1 ms         |                     |
-| (report default)        | 20                     | 50.0 ms         |                     |
+|-------------------------|------------------------|-----------------|-----------------------|
+| Composite Gyro Rotation | 1000                   | 1.0 ms          | 1 ms                  |
+| Accelerometer           | 500                    | 2.0 ms          | 4, 8, 16, 32, 64...   |
+| Rotation Vector         | 400                    | 2.5 ms          |                       |
+| Gaming Rotation         | 400                    | 2.5 ms          | 5, 10, 20, 40, 50, 60 |
+| Gravity                 | 400                    | 2.5 ms          |                       |
+| Linear Acceleration     | 400                    | 2.5 ms          |                       |
+| Gyroscope               | 400                    | 2.5 ms          | 5, 10, 20, 40, 50, 60 |
+| Magnetometer            | 100                    | 10.0 ms         | 10, 20, 40, 50, 60,   |
+| Geomagnetic Rotation    | 90                     | 11.1 ms         |                       |
+| raw Gyroscope           |                        |                 | 10, 20, 40, 50, 60    |
+| raw Magnetometer        |                        |                 | 50, 60,               |
+| raw Accelerometer       |                        |                 | 32, 64, 96            |
+| (report default)        | 20                     | 50.0 ms         |                       |
 
 Report frequencies should be enabled before requesting reports. To convert from period in ms to Hz (1000000/period.)
 
