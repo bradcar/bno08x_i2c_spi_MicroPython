@@ -29,6 +29,10 @@ Implementation Notes
 * MicroPython
 
 TODO: updating sensor values more asychronously
+TODO: add 3-tuple, 4-tuple, 5-tuple returns, also with .meta and .full returns with acc & ts
+
+TODO: debug soft reset in SPI
+
 TODO: BRC test i2c with Reset & Interrupt pins (no wake?)
 TODO: BRC I2c add quick fail and good error message if no i2c devices found
 TODO: BRC add protection to ensure only pin objects, not numbers are passed in (spi.py, i2c.py, and uart)
@@ -933,7 +937,7 @@ class BNO08X:
                 # transient read errors should not block
                 # small delay prevents hammering SPI if line is unstable
                 # TODO sleep_ms(2) too long
-                sleep_ms(2)
+                sleep_ms(1)
                 continue
 
             if new_packet:
@@ -950,6 +954,37 @@ class BNO08X:
         flag = processed_count > 0
         self._dbg(f"_process_available_packets done, {processed_count} packets processed - {flag}")
         return flag
+    
+############ TODO  BRC  - this loop actually slower -- Why?
+#     def _process_available_packets(self, max_packets: Optional[int] = 10) -> bool:
+#         """
+#         optimized for burst processing and eliminates internal
+#         The only delay is a 1ms throttle during bus failure.
+#         """
+#         processed_count = 0
+# 
+#         # Loop relies only on the _data_ready flag and the max_packets limit
+#         while self._data_ready: 
+#             
+#             if max_packets is not None and processed_count >= max_packets:
+#                 self._dbg(f"Hit max_packets limit ({max_packets})")
+#                 break
+#                 
+#             try:
+#                 new_packet = self._read_packet()
+#             
+#             except PacketError:
+#                 # 1ms delay prevents hammering the hardware/CPU if the bus is unstable.
+#                 self._dbg("Transient read error. Throttling with sleep_ms(1).")
+#                 sleep_ms(1)
+#                 continue # Skip processing and try reading again
+#             
+#             self._handle_packet(new_packet)
+#             processed_count += 1
+#             
+#         flag = processed_count > 0
+#         self._dbg(f"_process_available_packets done, {processed_count} packets processed.")
+#         return flag
 
     def _wait_for_packet_type(self, channel, timeout=3.0):
         """
