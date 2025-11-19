@@ -9,7 +9,13 @@
 
 bno08x MicroPython driver for I2C, SPI, UART on MicroPython
 
-This library has been tested with BNO086 sensor. It should work with BNO080 and BNO085 sensors. It has been tested with Raspberry Pico 2 W
+This library has been tested with BNO086 sensor. It should work with BNO080 and BNO085 sensors. 
+It has been tested with Raspberry Pico 2 W.
+
+This driver is written to provide a simple interface and results for slow updates. It also provides 0.1 msec resolution 
+timestamps for each sensor report, because knowing IMU results together with timestamp of results is critical for many
+telemetry applications.  This driver is written to be efficient because these sensors can update results as frequently
+as every 4ms to 10ms (depending on the report requested).
 
 ## Setting up to use the Sensor
 
@@ -17,30 +23,27 @@ This library has been tested with BNO086 sensor. It should work with BNO080 and 
 
     # import the library
     from i2c import BNO08X_I2C
-    from bno08x import BNO_REPORT_GYROSCOPE, BNO_REPORT_GAME_ROTATION_VECTOR, BNO_REPORT_MAGNETOMETER, BNO_REPORT_ACCELEROMETER
+    from bno08x import *
 
     # set up the  I2C bus
     i2c0 = I2C(0, scl=Pin(13), sda=Pin(12), freq=100_000, timeout=200_000)
 
     # set up the BNO sensor on I2C
-    bno = BNO08X_I2C(i2c0, address=0x4b)
-- 
-- address : if using 2 BNO08x each needs a separate address (depending on board, add solder jump or cut wire).
-
-Optional parameters:
-
-    bno = BNO08X_I2C(i2c0, address=0x4b, reset_pin=Pin(12), int_pin=Pin(13), debug=False)
+    bno = BNO08X_I2C(i2c0, address=0x4b, int_pin=Pin(13))
 
 Required for I2C (see SPI and UART below):
+- address : if using 2 BNO08x each needs a separate address (depending on board, add solder jump or cut wire).
 - int_pin : required by I2C for accurate sensor timestamps. Define a Pin object, not  number.
+
+Optional parameters:
+    bno = BNO08X_I2C(i2c0, address=0x4b, reset_pin=Pin(12), int_pin=Pin(13), debug=False)
+
 Optional for I2C:
 - reset_pin : used by I2C for hardware reset, if not defined uses soft reset. It is a Pin object, not number
+- debug : print very detailed logs, mainly for debugging driver.
 
 PS0(Wake_pin) and PS1 are used to select I2C, therefore I2C can not use wake pin.
 In order to use I2C, PS1 can not have solder blob so it is tied to ground and PS0(Wake_pin) can not have solder blob so it is tied to ground.
-
-Optional
-- debug : print very detailed logs, mainly for debugging driver.
 
 ## Enable the sensor reports
 
@@ -63,18 +66,10 @@ Primary sensor reports:
         BNO_REPORT_STABILITY_CLASSIFIER
         BNO_REPORT_ACTIVITY_CLASSIFIER
 
-Additional reports:
-
-        BNO_REPORT_RAW_ACCELEROMETER
-        BNO_REPORT_RAW_GYROSCOPE
-        BNO_REPORT_RAW_MAGNETOMETER
-        BNO_REPORT_UNCALIBRATED_GYROSCOPE
-        BNO_REPORT_UNCALIBRATED_MAGNETOMETER
-        BNO_REPORT_ARVR_STABILIZED_ROTATION_VECTOR
-        BNO_REPORT_ARVR_STABILIZED_GAME_ROTATION_VECTOR
-        BNO_REPORT_GYRO_INTEGRATED_ROTATION_VECTOR
-
-There are additional sensor reports that this driver has not fully implemented. See code and references for details.
+Additional reports, however using these requires more extensive math for effective use:
+The raw reports, without fusion, can be accesed for acceleration, magnetic, and gyro sensors. This is not generally recommended as
+it will require signficant math (careful calibaration, Kalman filters, etc.). In addition, there are other sensor reports
+that this driver has not fully implemented. See code and references for details.
 
 ## Getting the sensor results:
 
@@ -86,9 +81,20 @@ Roll, tilt, and yaw can be obtained with:
 
     roll, tilt, yaw = bno.euler
 
+The data and the metadata for each report can be accessed at the same time using ".full".
+In this way, the accuracy and the usec-accurate timestamp  of a particular report is returned at the same time.
+The timestamp_us is synchronized with the host's usec time. This is recommended for high-frequency applications (>5Hz).
+
+    accel_x, accel_y, accel_z, accuracy, timestamp_us = bno.acceleration.full
+
+Metadata on the accuracy and the usec-accurate timestamp can also be separately accessed. However, unless carefully
+designed in the user code, they may be from a different report.
+
+    accuracy, timestamp_us = bno.acceleration.meta
+
 **Examples of other sensor reports**
 
-See examples directory for sample code. The following functions use on-chip sensor fusion for accuracy.
+The examples directory shows the use of the following sensor reports. Each of these functions use on-chip sensor fusion for accuracy.
 
     x, y, z = bno.acceleration  # acceleration 3-tuple of x,y,z float returned
     x, y, z = bno.linear_acceleration  # linear accel 3-tuple of x,y,z float returned
@@ -115,15 +121,6 @@ The following functions can be used to tare, calibrate, and test the sensor:
 
     status = bno.ready  # test sensor status, boolean returned
 
-The following functions provide raw values directly from individual sensors, they lack the advanced on-sensor software that make the above functions more accurate:
-
-    # raw data sensor tuple of x,y,z, float and time_stamp int returned
-    x, y, z, usec = bno.raw_acceleration
-    x, y, z, usec = bno.raw_magnetic
-    
-    # raw data gyro tuple of x,y,z, celsius float, and time_stamp int returned
-    x, y, z, temp_c, usec = bno.raw_gyro
-
 ## Option to Change Sensor Report Frequency
 
 The sensor report default frequency is 20 Hz. The number of reports per second that the BNO08X can reliably deliver is dependent on the interface bandwidth
@@ -136,8 +133,8 @@ Before getting sensor results the reports must be enabled:
 
 ## Euler angles, gimbal lock, and quaternions
 
-Euler angles have a problem with Gimbal lock. This is where a loss of a degree of freedom occurs when two rotational axes align, which means certain orientations have multiple representations. There was a famous example of this on Apollo 11.
-Quaternions avoid this problem because they represent a rotation as a single axis and an angle, providing a unique representation for every possible orientation. 
+Euler angles have a problem with Gimbal Lock. With Euler angles, a loss of a degree of freedom occurs when two rotational axes align, which means certain orientations have multiple representations. There was a famous example of this on Apollo 11.
+Quaternions avoid this by providing a unique representation for every possible orientation problem. Theu use several rotation around a single axis and an angle.
 
 - https://base.movella.com/s/article/Understanding-Gimbal-Lock-and-how-to-prevent-it?language=en_US
 - https://en.wikipedia.org/wiki/Gimbal_lock
@@ -149,16 +146,14 @@ Unfortunately, the BNO080, BNO085, and BNO086 all use **_non-standard clock stre
 ## SPI Setup
 
 Requirements to using Sparkfun BNO086 with SPI
-1. must clear i2c jumper when using SPI or UART (https://docs.sparkfun.com/SparkFun_VR_IMU_Breakout_BNO086_QWIIC/assets/board_files/SparkFun_VR_IMU_Breakout_BNO086_QWIIC_Schematic_v10.pdf)
-2. must have solder blob ONLY on SP1, must have Wake pin connect to a pin.
-3. UART MUST be set to baudrate=3000000
+1. One must clear i2c jumper when using SPI or UART (https://docs.sparkfun.com/SparkFun_VR_IMU_Breakout_BNO086_QWIIC/assets/board_files/SparkFun_VR_IMU_Breakout_BNO086_QWIIC_Schematic_v10.pdf)
+2. One must have solder blob ONLY on SP1, must have Wake pin connect to a pin.
+3. UART must be set to baudrate=3000000
 
 In order to use SPI on most sensor boards instead of I2C you must often have to add ONE solder blob on PS1. 
 On the back side of Sparkfun BNO086 and Adafruit BNO085, one needs a solder blob to bridge PS1 which will set PS1 high for SPI operation. 
-The PS0(Wake_pin) is connect to a gpio.
-This driver will used the wake-pin after reset as a ‘wake’ signal taking the BNO08X out of sleep for communication with the BNO08X.
-
-Do not put a solder blog on PS0, it must be connected to a wake_pin.
+The PS0(Wake_pin) must be connected to a gpio (wake_pin), be careful not put a solder blog on PS0.
+This driver uses the wake-pin after reset as a ‘wake’ signal taking the BNO08X out of sleep for communication with the BNO08X.
 
     from machine import SPI, Pin
     from spi import BNO08X_SPI
@@ -166,14 +161,14 @@ Do not put a solder blog on PS0, it must be connected to a wake_pin.
 
     int_pin = Pin(14, Pin.IN, Pin.PULL_UP)  # Interrupt, enables BNO to signal when ready
     reset_pin = Pin(15, Pin.OUT)  # Reset to signal BNO to reset
-    cs = Pin(17, Pin.OUT)  # cs for SPI
+    cs_pin = Pin(17, Pin.OUT)  # cs for SPI
     wake_pin = Pin(20, Pin.OUT, value=1)  # Wakes BNO to enable INT response
 
 
     spi = SPI(0, sck=Pin(18), mosi=Pin(19), miso=Pin(16), baudrate=3_000_000)
     print(spi)
 
-    bno = BNO08X_SPI(spi, cs, int_pin, reset_pin, wake_pin, debug=False)
+    bno = BNO08X_SPI(spi, cs_pin, int_pin, reset_pin, wake_pin, debug=False)
 
 Required for SPI
 - int_pin : Required by SPI for accurate sensor timestamps. Define a Pin object, not  number.
@@ -182,14 +177,14 @@ Optional for SPI
 - reset_pin : used by SPI for hardware reset, if not defined uses soft reset. It is a Pin object, not number
 
 ## UART Setup
-UART wires are in some sense opposite of i2c wires (double check your wiring).
+UART wires are in some sense opposite of i2c wires (double-check your wiring).
 uart = UART(1, baudrate=3_000_000, tx=Pin(8), rx=Pin(9), timeout=2000)
 uart = UART(0, baudrate=3_000_000, tx=Pin(12), rx=Pin(13), timeout=2000)
 
-Required for I2C (see SPI and UART below):
-- int_pin : required by I2C for accurate sensor timestamps. Define a Pin object, not  number.
-Optional for I2c:
-- reset_pin : used by I2C for hardware reset, if not defined uses soft reset. It is a Pin object, not number
+Required for UART:
+- int_pin : required by UART for accurate sensor timestamps. Define a Pin object, not number.
+Optional for UART:
+- reset_pin : used by UART for hardware reset, if not defined uses soft reset. It is a Pin object, not number
 
  1. BNO08x SDA to board UARTx-RX (uart 1 ex: gpio9, uart 0 ex: gpio13)
  2. BNO08x SCL to board UARTx-TX (uart 1 ex: gbio8, uart 0 ex: gpio12)
