@@ -26,10 +26,11 @@ as every 4ms to 10ms (depending on the report requested).
     from bno08x import *
 
     # set up the  I2C bus
+    int_pin = Pin(14, Pin.IN, Pin.PULL_UP)
     i2c0 = I2C(0, scl=Pin(13), sda=Pin(12), freq=100_000, timeout=200_000)
 
     # set up the BNO sensor on I2C
-    bno = BNO08X_I2C(i2c0, address=0x4b, int_pin=Pin(13))
+    bno = BNO08X_I2C(i2c0, address=0x4b, int_pin=int_pin)
 
 Required for I2C (see SPI and UART below):
 - address : if using 2 BNO08x each needs a separate address (depending on board, add solder jump or cut wire).
@@ -42,8 +43,8 @@ Optional for I2C:
 - reset_pin : used by I2C for hardware reset, if not defined uses soft reset. It is a Pin object, not number
 - debug : print very detailed logs, mainly for debugging driver.
 
-PS0(Wake_pin) and PS1 are used to select I2C, therefore I2C can not use wake pin.
-In order to use I2C, PS1 can not have solder blob so it is tied to ground and PS0(Wake_pin) can not have solder blob so it is tied to ground.
+PS0 (Wake_pin) and PS1 are used to select I2C, therefore I2C can not use wake pin.
+In order to use I2C, PS1 can not have solder blob so it is tied to ground and PS0 (Wake_pin) can not have solder blob so it is tied to ground.
 
 ## Enable the sensor reports
 
@@ -66,10 +67,9 @@ Primary sensor reports:
         BNO_REPORT_STABILITY_CLASSIFIER
         BNO_REPORT_ACTIVITY_CLASSIFIER
 
-Additional reports, however using these requires more extensive math for effective use:
-The raw reports, without fusion, can be accesed for acceleration, magnetic, and gyro sensors. This is not generally recommended as
-it will require signficant math (careful calibaration, Kalman filters, etc.). In addition, there are other sensor reports
-that this driver has not fully implemented. See code and references for details.
+The raw reports, which do not use sensor fusion calculations, are also implemented for acceleration, magnetic, and gyro sensors. It is not generally recommended to use
+these reports and they require signficant math (careful calibaration, Kalman filters, etc.). Please read all references below when attempting to use raw reports.
+In addition, there are other sensor reports possible with the bno08x sensors that this driver has not fully implemented. See code and references for details.
 
 ## Getting the sensor results:
 
@@ -83,7 +83,7 @@ Roll, tilt, and yaw can be obtained with:
 
 The data and the metadata for each report can be accessed at the same time using ".full".
 In this way, the accuracy and the usec-accurate timestamp  of a particular report is returned at the same time.
-The timestamp_us is synchronized with the host's usec time. This is recommended for high-frequency applications (>5Hz).
+The timestamp_us is synchronized with the host's usec time. Understanding timestamps is recommended for high-frequency applications (>5Hz).
 
     accel_x, accel_y, accel_z, accuracy, timestamp_us = bno.acceleration.full
 
@@ -152,23 +152,22 @@ Requirements to using Sparkfun BNO086 with SPI
 
 In order to use SPI on most sensor boards instead of I2C you must often have to add ONE solder blob on PS1. 
 On the back side of Sparkfun BNO086 and Adafruit BNO085, one needs a solder blob to bridge PS1 which will set PS1 high for SPI operation. 
-The PS0(Wake_pin) must be connected to a gpio (wake_pin), be careful not put a solder blog on PS0.
+The PS0 (Wake_pin) must be connected to a gpio (wake_pin), be careful not put a solder blog on PS0.
 This driver uses the wake-pin after reset as a ‘wake’ signal taking the BNO08X out of sleep for communication with the BNO08X.
 
     from machine import SPI, Pin
     from spi import BNO08X_SPI
-    from bno08x import BNO_REPORT_ACCELEROMETER
+    from bno08x import *
 
     int_pin = Pin(14, Pin.IN, Pin.PULL_UP)  # Interrupt, enables BNO to signal when ready
     reset_pin = Pin(15, Pin.OUT)  # Reset to signal BNO to reset
     cs_pin = Pin(17, Pin.OUT)  # cs for SPI
     wake_pin = Pin(20, Pin.OUT, value=1)  # Wakes BNO to enable INT response
 
-
     spi = SPI(0, sck=Pin(18), mosi=Pin(19), miso=Pin(16), baudrate=3_000_000)
     print(spi)
 
-    bno = BNO08X_SPI(spi, cs_pin, int_pin, reset_pin, wake_pin, debug=False)
+    bno = BNO08X_SPI(spi, cs_pin=cs_pin, int_pin=int_pin, reset_pin=reset_pin, wake_pin=wake_pin, debug=False)
 
 Required for SPI
 - int_pin : Required by SPI for accurate sensor timestamps. Define a Pin object, not  number.
@@ -194,11 +193,6 @@ PS0 and PS1 are the host interface protocol selection pins, therefore UART can n
 
 1. must clear i2c jumper when using SPI or UART (https://docs.sparkfun.com/SparkFun_VR_IMU_Breakout_BNO086_QWIIC/assets/board_files/SparkFun_VR_IMU_Breakout_BNO086_QWIIC_Schematic_v10.pdf)
 2. must have solder blob ONLY on SP1, must NOT have Wake pin connect to a pin.
-
-## UART-RVC - NOT SUPPORTED (RVC, Robot Vacuum Cleaners)
-
-The BNO08X has a simplified UART interface for use on unmanned ground roving robot and robot vacuum cleaners (RVC).
-This is a very different protocol and not supported in my driver. Take a look at: https://github.com/rdagger/micropython-bno08x-rvc
 
 ## Report Maximum Frequencioes
 
@@ -236,6 +230,11 @@ With a single feature, we've seen the above requested 100 Hz have the sensor rep
 ## Calibration
 
 background: https://www.youtube.com/watch?v=0rlvvYgmTvI&t=28s
+
+## UART-RVC is NOT SUPPORTED by this driver (RVC, Robot Vacuum Cleaners)
+
+The BNO08X has a simplified UART interface for use on unmanned ground roving robot and robot vacuum cleaners (RVC).
+This is a very different protocol and not supported in my driver. Take a look at: https://github.com/rdagger/micropython-bno08x-rvc
 
 ## References
 
