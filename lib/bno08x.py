@@ -316,9 +316,9 @@ _SENSOR_REPORT_LAYOUT = {
     # 16-bit signed values (x,y,z or i,j,k,r)
     "v1": 4 | uctypes.INT16,
     "v2": 6 | uctypes.INT16,
-    "v3": 8 | uctypes.INT16,
+    "v3": 8 | uctypes.INT16,  # valid valid for 3-tuple reports
     "v4": 10 | uctypes.INT16,  # only valid for quaternion reports
-    "a1": 12 | uctypes.INT16,  # only valid for quaternion ARVR rotation report
+    "e1": 12 | uctypes.INT16,  # only valid for ARVR rotation report: quaternion + estimaate
 }
 
 _INITIAL_REPORTS = {
@@ -427,19 +427,12 @@ def _parse_sensor_report_data(report_bytes: bytearray) -> tuple[tuple, int]:
             s.v2 * scalar,
             s.v3 * scalar,
             s.v4 * scalar,
-            s.a1,
+            s.e1,
         )
     else:
         raise ValueError(f"Unexpected tuple length {count}")
 
     return scaled_data, accuracy, delay_us
-
-
-# Set Feature Command (0xfd) - host to sensor in SH-2 (6.5.4)
-# report_id (B), feature_report_id(B), feature_flags (B), change_sensitivity(H),
-# report_interval (I), batch_interval_word (I), sensor_specific_configuration_word (I)
-def _parse_get_feature_response_report(report_bytes: bytearray):
-    return unpack_from("<BBBHIII", report_bytes)
 
 
 def _parse_sensor_id(buffer: bytearray) -> tuple[int, ...]:
@@ -668,6 +661,7 @@ class BNO08X:
     @property
     def euler(self):
         # A 3-tuple representing the current Roll, Tilt, and Yaw euler angle in degree
+        # q[4] is accuracy, and q[5] is timestamp_us
         self._process_available_packets()
         try:
             q = self._report_values[self._quaternion_euler_vector]
@@ -946,7 +940,7 @@ class BNO08X:
                 self._dbg(f"\nHandle packet processed {processed_count} reports")
 
             # safety timeout if data ready stuck
-            # TODO 50 way too long
+            # TODO > 50 way too long, changed to > 3
             if ticks_diff(ticks_ms(), start_time) > 3:
                 self._dbg("Timeout in _process_available_packets")
                 break
@@ -954,37 +948,7 @@ class BNO08X:
         flag = processed_count > 0
         self._dbg(f"_process_available_packets done, {processed_count} packets processed - {flag}")
         return flag
-    
-############ TODO  BRC  - this loop actually slower -- Why?
-#     def _process_available_packets(self, max_packets: Optional[int] = 10) -> bool:
-#         """
-#         optimized for burst processing and eliminates internal
-#         The only delay is a 1ms throttle during bus failure.
-#         """
-#         processed_count = 0
-# 
-#         # Loop relies only on the _data_ready flag and the max_packets limit
-#         while self._data_ready: 
-#             
-#             if max_packets is not None and processed_count >= max_packets:
-#                 self._dbg(f"Hit max_packets limit ({max_packets})")
-#                 break
-#                 
-#             try:
-#                 new_packet = self._read_packet()
-#             
-#             except PacketError:
-#                 # 1ms delay prevents hammering the hardware/CPU if the bus is unstable.
-#                 self._dbg("Transient read error. Throttling with sleep_ms(1).")
-#                 sleep_ms(1)
-#                 continue # Skip processing and try reading again
-#             
-#             self._handle_packet(new_packet)
-#             processed_count += 1
-#             
-#         flag = processed_count > 0
-#         self._dbg(f"_process_available_packets done, {processed_count} packets processed.")
-#         return flag
+
 
     def _wait_for_packet_type(self, channel, timeout=3.0):
         """
@@ -1153,8 +1117,7 @@ class BNO08X:
 
         # Feature response (0xfc)
         if report_id == _GET_FEATURE_RESPONSE:
-            get_feature_report = _parse_get_feature_response_report(report_bytes)
-            _report_id, feature_report_id, *_remainder = get_feature_report
+            _report_id, feature_report_id = unpack_from("<BB", report_bytes)
             self._report_values[feature_report_id] = _INITIAL_REPORTS.get(feature_report_id, (0.0, 0.0, 0.0, 0, 0))
             return
 
@@ -1307,7 +1270,7 @@ class BNO08X:
     # Enable a given feature of the BNO08x (See Hillcrest 6.5.4)
     def enable_feature(self, feature_id, freq=None):
         """
-        Enable sensor features the bno08x returns/
+        Enable sensor features for bno08x, set period in usec (not ms)
         Called recursively since some raw require non-raw to be enabled
 
         On Channel (0x02), send _SET_FEATURE_COMMAND (0xfb) with feature id
@@ -1318,6 +1281,8 @@ class BNO08X:
         set_feature_report = bytearray(17)
         set_feature_report[0] = _SET_FEATURE_COMMAND
         set_feature_report[1] = feature_id
+        
+        print(f"{feature_id=} {AVAIL_REPORT_FREQ[feature_id]=} {freq=}")
 
         if freq is None:
             requested_interval = AVAIL_REPORT_FREQ[feature_id]
@@ -1351,10 +1316,10 @@ class BNO08X:
             # already start sending reports and this may get mixed up
             report_bytes = self._wait_for_packet(_BNO_CHANNEL_CONTROL, _GET_FEATURE_RESPONSE,
                                                  timeout=_FEATURE_ENABLE_TIMEOUT)
-            # report_id (B), feature_report_id(B), feature_flags (B), change_sensitivity(H),
-            # report_interval (I), batch_interval_word (I), sensor_specific_configuration_word (I)
-            _, fid, _, _, report_interval, _, _ = _parse_get_feature_response_report(report_bytes.data)
-
+            data = report_bytes.data
+            fid = data[1]
+            report_interval = unpack_from("<I", data, 5)[0]
+            
             self._report_values[feature_id] = _INITIAL_REPORTS.get(feature_id, (0.0, 0.0, 0.0, 0, 0))
             self._report_periods_dictionary_us[feature_id] = report_interval
             self._dbg(f"Report enabled: {_REPORTS_DICTIONARY[fid]}: {hex(fid)}")
