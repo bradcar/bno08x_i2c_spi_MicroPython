@@ -388,7 +388,7 @@ def _elapsed_sec(start_time):
 
 
 ############ REPORT PARSING ###########################
-def _parse_sensor_report_data(report_bytes: bytearray) -> tuple[tuple, int]:
+def _parse_sensor_report_data(report_bytes: bytearray) -> tuple[tuple, int, int]:
     """
     Fast uctypes-based parser for standard BNO08x sensor reports, sensor data starts at offset=4
     Parses 3-tuple vectors, 4-tuple quaternions, and 5-tuple ARVR rotation.
@@ -534,11 +534,12 @@ class Packet:
 
     @classmethod
     def header_from_buffer(cls, packet_bytes: bytearray) -> PacketHeader:
-        """Creates a `PacketHeader` object from a given buffer"""
-        packet_byte_count = unpack_from("<H", packet_bytes, 0)[0]
-        packet_byte_count &= ~0x8000
-        channel_number = unpack_from("<B", packet_bytes, 2)[0]
-        sequence_number = unpack_from("<B", packet_bytes, 3)[0]
+        """Creates a `PacketHeader` object from a given buffer"""        
+        header_data = unpack_from("<HBB", packet_bytes, 0)
+        packet_byte_count = header_data[0] & ~0x8000
+        channel_number = header_data[1]
+        sequence_number = header_data[2]
+        
         data_length = max(0, packet_byte_count - 4)
 
         header = PacketHeader(channel_number, sequence_number, data_length, packet_byte_count)
@@ -915,39 +916,40 @@ class BNO08X:
 
     ############### private/helper methods ###############
 
-    def _process_available_packets(self, max_packets: int = 10) -> None:
+    def _process_available_packets(self, max_packets: int = 10) -> bool:
         """
-            Read and handle up to `max_packets` packets while data-ready is active.
-
-        Returns: True - if processed_count > 0
+        Read and handle up to `max_packets` packets while a new interrupt is available.
+        safety timeout if data ready stuck
+        TODO: > 50 way too long, changed to > 3
+        TODO: With this logic, _data_ready stays True until all packets are read.
+        If _read_packet() does not return all data for one interrupt,
+        we may need a “drain loop” until no more packets exist.
         """
         processed_count = 0
         start_time = ticks_ms()
 
         while self._data_ready and processed_count < max_packets:
             try:
-                new_packet = self._read_packet()
+                new_packet = self._read_packet(wait=False)
             except PacketError:
-                # transient read errors should not block
-                # small delay prevents hammering SPI if line is unstable
-                # TODO sleep_ms(2) too long
-                sleep_ms(1)
+                # Transient read errors should not block
+                sleep_us(250)
                 continue
 
             if new_packet:
                 self._handle_packet(new_packet)
                 processed_count += 1
-                self._dbg(f"\nHandle packet processed {processed_count} reports")
+                self._dbg(f"Processed {processed_count} packet{'s' if processed_count > 1 else ''}")
 
-            # safety timeout if data ready stuck
-            # TODO > 50 way too long, changed to > 3
-            if ticks_diff(ticks_ms(), start_time) > 3:
+            # Safety timeout to avoid infinite loop if interrupt stuck
+            if ticks_diff(ticks_ms(), start_time) > 2:  # ms
                 self._dbg("Timeout in _process_available_packets")
                 break
 
         flag = processed_count > 0
         self._dbg(f"_process_available_packets done, {processed_count} packets processed - {flag}")
         return flag
+
 
 
     def _wait_for_packet_type(self, channel, timeout=3.0):
@@ -1282,8 +1284,6 @@ class BNO08X:
         set_feature_report[0] = _SET_FEATURE_COMMAND
         set_feature_report[1] = feature_id
         
-        print(f"{feature_id=} {AVAIL_REPORT_FREQ[feature_id]=} {freq=}")
-
         if freq is None:
             requested_interval = AVAIL_REPORT_FREQ[feature_id]
         elif freq == 0:
