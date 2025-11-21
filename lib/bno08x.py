@@ -206,8 +206,7 @@ _BNO_HEADER_LEN = const(4)
 _COMMAND_STATUS_SUCCESS = 0
 
 # Report Frequencies in Hertz
-DEFAULT_REPORT_FREQ = 20
-AVAIL_REPORT_FREQ = {
+DEFAULT_REPORT_FREQ = {
     BNO_REPORT_ACCELEROMETER: 20,
     BNO_REPORT_GYROSCOPE: 20,
     BNO_REPORT_MAGNETOMETER: 20,
@@ -588,6 +587,8 @@ class BNO08X:
         self._quaternion_euler_vector = BNO_REPORT_GAME_ROTATION_VECTOR  # default can change with set_quaternion_euler
         # dictionary of most recent values from each enabled sensor report
         self._report_values = {}
+        # dictionary of reports received but not yet read by user
+        self._unread_report_count = {}
         self._report_periods_dictionary_us = {}
 
         self.reset_sensor()
@@ -631,6 +632,9 @@ class BNO08X:
         """A tuple of the current magnetic field measurements on the X, Y, and Z axes"""
         self._process_available_packets()
         try:
+            print(f"mag before {self._unread_report_count[BNO_REPORT_MAGNETOMETER]}")
+            self._unread_report_count[BNO_REPORT_MAGNETOMETER] = 0
+            print(f"mag clear  {self._unread_report_count[BNO_REPORT_MAGNETOMETER]}")
             return self._report_values[BNO_REPORT_MAGNETOMETER]
         except KeyError:
             raise RuntimeError("Magnetometer report not enabled, use enable_feature") from None
@@ -641,6 +645,7 @@ class BNO08X:
         self._process_available_packets()
         try:
             # TODO BRC understand
+            self._unread_report_count[self._quaternion_euler_vector] = 0
             return self._report_values[self._quaternion_euler_vector]
         except KeyError:
             raise RuntimeError("quaternion report not enabled, use enable_feature") from None
@@ -651,6 +656,7 @@ class BNO08X:
         # q[4] is accuracy, and q[5] is timestamp_us
         self._process_available_packets()
         try:
+            self._unread_report_count[self._quaternion_euler_vector] = 0
             q = self._report_values[self._quaternion_euler_vector]
         except KeyError:
             raise RuntimeError("quaternion report not enabled, use enable_feature") from None
@@ -676,6 +682,7 @@ class BNO08X:
         """A quaternion representing the current geomagnetic rotation vector"""
         self._process_available_packets()
         try:
+            self._unread_report_count[BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR] = 0
             return self._report_values[BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR]
         except KeyError:
             raise RuntimeError("geomagnetic quaternion report not enabled, use enable_feature") from None
@@ -688,6 +695,7 @@ class BNO08X:
         corrected using the magnetometer. Some drift is expected"""
         self._process_available_packets()
         try:
+            self._unread_report_count[BNO_REPORT_GAME_ROTATION_VECTOR] = 0
             return self._report_values[BNO_REPORT_GAME_ROTATION_VECTOR]
         except KeyError:
             raise RuntimeError("game quaternion report not enabled, use enable_feature") from None
@@ -697,6 +705,7 @@ class BNO08X:
         """The number of steps detected since the sensor was initialized"""
         self._process_available_packets()
         try:
+            self._unread_report_count[BNO_REPORT_STEP_COUNTER] = 0
             return self._report_values[BNO_REPORT_STEP_COUNTER]
         except KeyError:
             raise RuntimeError("steps report not enabled, use enable_feature") from None
@@ -707,6 +716,7 @@ class BNO08X:
         axes in meters per second squared"""
         self._process_available_packets()
         try:
+            self._unread_report_count[BNO_REPORT_LINEAR_ACCELERATION] = 0
             return self._report_values[BNO_REPORT_LINEAR_ACCELERATION]
         except KeyError:
             raise RuntimeError("linear acceleration report not enabled, use enable_feature") from None
@@ -715,6 +725,9 @@ class BNO08X:
     def acceleration(self):
         self._process_available_packets()
         try:
+            print(f"acc before {self._unread_report_count[BNO_REPORT_ACCELEROMETER]}")
+            self._unread_report_count[BNO_REPORT_ACCELEROMETER] = 0
+            print(f"acc clear  {self._unread_report_count[BNO_REPORT_ACCELEROMETER]}")
             return self._report_values[BNO_REPORT_ACCELEROMETER]
         except KeyError:
             raise RuntimeError("acceleration report not enabled, use enable_feature") from None
@@ -725,6 +738,7 @@ class BNO08X:
         axes in meters per second squared"""
         self._process_available_packets()
         try:
+            self._unread_report_count[BNO_REPORT_GRAVITY] = 0
             return self._report_values[BNO_REPORT_GRAVITY]
         except KeyError:
             raise RuntimeError("gravity report not enabled, use enable_feature") from None
@@ -735,6 +749,7 @@ class BNO08X:
         axes in radians per second"""
         self._process_available_packets()
         try:
+            self._unread_report_count[BNO_REPORT_GYROSCOPE] = 0
             return self._report_values[BNO_REPORT_GYROSCOPE]
         except KeyError:
             raise RuntimeError("gyroscope report not enabled, use enable_feature") from None
@@ -800,8 +815,8 @@ class BNO08X:
         """Returns the sensor's raw, unscaled value from the accelerometer registers"""
         self._process_available_packets()
         try:
-            raw_acceleration = self._report_values[BNO_REPORT_RAW_ACCELEROMETER]
-            return raw_acceleration
+            self._unread_report_count[BNO_REPORT_RAW_ACCELEROMETER] = 0
+            return self._report_values[BNO_REPORT_RAW_ACCELEROMETER]
         except KeyError:
             raise RuntimeError("raw acceleration report not enabled, use enable_feature") from None
 
@@ -810,8 +825,8 @@ class BNO08X:
         """Returns the sensor's raw, unscaled value from the gyro registers"""
         self._process_available_packets()
         try:
-            raw_gyro = self._report_values[BNO_REPORT_RAW_GYROSCOPE]
-            return raw_gyro
+            self._unread_report_count[BNO_REPORT_RAW_GYROSCOPE] = 0
+            return self._report_values[BNO_REPORT_RAW_GYROSCOPE]
         except KeyError:
             raise RuntimeError("raw gyroscope report not enabled, use enable_feature") from None
 
@@ -820,8 +835,8 @@ class BNO08X:
         """Returns the sensor's raw, unscaled value from the magnetometer registers"""
         self._process_available_packets()
         try:
-            raw_magnetic = self._report_values[BNO_REPORT_RAW_MAGNETOMETER]
-            return raw_magnetic
+            self._unread_report_count[BNO_REPORT_RAW_MAGNETOMETER] = 0
+            return self._report_values[BNO_REPORT_RAW_MAGNETOMETER]
         except KeyError:
             raise RuntimeError("raw magnetic report not enabled, use enable_feature") from None
 
@@ -906,6 +921,7 @@ class BNO08X:
         If _read_packet() does not return all data for one interrupt,
         we may need a “drain loop” until no more packets exist.
         """
+        print(f"begin enable{self._unread_report_count=}")
         processed_count = 0
         start_time = ticks_ms()
 
@@ -929,6 +945,7 @@ class BNO08X:
 
         flag = processed_count > 0
         self._dbg(f"_process_available_packets done, {processed_count} packets processed - {flag}")
+        print(f"end   enable{self._unread_report_count=}")
         return flag
 
 
@@ -1055,6 +1072,7 @@ class BNO08X:
         if report_id == _GET_FEATURE_RESPONSE:
             _report_id, feature_report_id = unpack_from("<BB", report_bytes)
             self._report_values[feature_report_id] = _INITIAL_REPORTS.get(feature_report_id, (0.0, 0.0, 0.0, 0, 0))
+            self._unread_report_count[feature_report_id] = 0
             return
 
         # Command Response (0xF1)
@@ -1129,6 +1147,7 @@ class BNO08X:
                 self._magnetometer_accuracy = accuracy
 
             self._report_values[report_id] = sensor_data + (accuracy, self._sensor_us)
+            self._unread_report_count[report_id] += 1
             return
 
         # Handle all control reports
@@ -1206,9 +1225,7 @@ class BNO08X:
         """
         Enable sensor features for bno08x, set period in usec (not ms)
         Called recursively since some raw require non-raw to be enabled
-
-        On Channel (0x02), send _SET_FEATURE_COMMAND (0xfb) with feature id
-        await GET_FEATURE_RESPONSE (0xfc)
+        On Channel (0x02), send _SET_FEATURE_COMMAND (0xfb) with feature id await GET_FEATURE_RESPONSE (0xfc)
         """
         self._dbg(f"ENABLING FEATURE ID... {hex(feature_id)}")
         set_feature_report = bytearray(17)
@@ -1216,7 +1233,7 @@ class BNO08X:
         set_feature_report[1] = feature_id
         
         if freq is None:
-            requested_interval = AVAIL_REPORT_FREQ[feature_id]
+            requested_interval = DEFAULT_REPORT_FREQ[feature_id]
         elif freq == 0:
             requested_interval = 0
         else:
@@ -1230,7 +1247,7 @@ class BNO08X:
         feature_dependency = _RAW_REPORTS.get(feature_id, None)
         if feature_dependency and feature_dependency not in self._report_values:
             self._dbg(f" Feature dependency: {feature_dependency}")
-            self.enable_feature(feature_dependency, AVAIL_REPORT_FREQ[feature_dependency])
+            self.enable_feature(feature_dependency, DEFAULT_REPORT_FREQ[feature_dependency])
 
         # UART operation reqires wake_pin is None
         if self._wake_pin is not None:
