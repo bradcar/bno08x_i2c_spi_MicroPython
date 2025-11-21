@@ -67,10 +67,6 @@ Primary sensor reports:
         BNO_REPORT_STABILITY_CLASSIFIER
         BNO_REPORT_ACTIVITY_CLASSIFIER
 
-The raw reports, which do not use sensor fusion calculations, are also implemented for acceleration, magnetic, and gyro sensors. It is not generally recommended to use
-these reports and they require signficant math (careful calibaration, Kalman filters, etc.). Please read all references below when attempting to use raw reports.
-In addition, there are other sensor reports possible with the bno08x sensors that this driver has not fully implemented. See code and references for details.
-
 ## Getting the sensor results:
 
 Sensors values can be accessed with:
@@ -83,7 +79,8 @@ Roll, tilt, and yaw can be obtained with:
 
 The data and the metadata for each report can be accessed at the same time using ".full".
 In this way, the accuracy and the usec-accurate timestamp  of a particular report is returned at the same time.
-The timestamp_us is synchronized with the host's usec time. Understanding timestamps is recommended for high-frequency applications (>5Hz).
+The timestamp_us is synchronized with the host's usec time. Understanding timestamps is recommended for
+high-frequency applications (>5Hz).
 
     accel_x, accel_y, accel_z, accuracy, timestamp_us = bno.acceleration.full
 
@@ -123,9 +120,14 @@ The following functions can be used to tare, calibrate, and test the sensor:
 
 ## Option to Change Sensor Report Frequency
 
-The sensor report default frequency is 20 Hz. The number of reports per second that the BNO08X can reliably deliver is dependent on the interface bandwidth
-and the number of reports that a BNO08X is asked to generate. I2C will definitely limit this frequency (est 10 to 50 Hz with a few reports). One should consider SPI for higher frequencies.
-Refer to the BNO080_085-Datasheet.pdf (page 50) for Maximum sensor report rates by report type. Some sensor reports can be updated at 400 to 400 Hz on SPI (untested). If your code request faster than the report feature frequency specified, repeated values will be returned.
+The sensor report default frequencies are 10 to 20 Hz. The number of reports per second that the BNO08X can reliably
+deliver is dependent on the interface bandwidth and the number of reports that a BNO08X is asked to generate. Currently,
+on a Raspberry Pi Pico 2 W we can support reports with frequencies up to 125 Hz (8ms).
+
+I2C will definitely limit this frequency (est 10 to 50 Hz with a few reports). One should consider SPI for higher frequencies.
+Refer to the BNO080_085-Datasheet.pdf (page 50) for Maximum sensor report rates by report type.
+Some sensor reports can be updated at 400 to 400 Hz on SPI (untested). If your code request faster than the report
+feature frequency specified, repeated values will be returned.
 
 Before getting sensor results the reports must be enabled:
 
@@ -133,7 +135,9 @@ Before getting sensor results the reports must be enabled:
 
 ## Euler angles, gimbal lock, and quaternions
 
-Euler angles have a problem with Gimbal Lock. With Euler angles, a loss of a degree of freedom occurs when two rotational axes align, which means certain orientations have multiple representations. There was a famous example of this on Apollo 11.
+Euler angles have a problem with Gimbal Lock. With Euler angles, a loss of a degree of freedom occurs when two
+rotational axes align, which means certain orientations have multiple representations. 
+There was a famous example of this on Apollo 11.
 Quaternions avoid this by providing a unique representation for every possible orientation problem. Theu use several rotation around a single axis and an angle.
 
 - https://base.movella.com/s/article/Understanding-Gimbal-Lock-and-how-to-prevent-it?language=en_US
@@ -143,7 +147,7 @@ Quaternions avoid this by providing a unique representation for every possible o
 
 Unfortunately, the BNO080, BNO085, and BNO086 all use **_non-standard clock stretching_** on the I2C. This can cause a variety of issues including report errors and the need to restart sensor. Clock stretching interferes with various chips (ex: RP2) in different ways. If you see sporadic results this may be part of the issue (BNO08X Datasheet 1000-3927 v1.17, page 15).
 
-## SPI Setup
+## SPI Setup - for higher speed sensor reports
 
 Requirements to using Sparkfun BNO086 with SPI
 1. One must clear i2c jumper when using SPI or UART (https://docs.sparkfun.com/SparkFun_VR_IMU_Breakout_BNO086_QWIIC/assets/board_files/SparkFun_VR_IMU_Breakout_BNO086_QWIIC_Schematic_v10.pdf)
@@ -185,8 +189,8 @@ Required for UART:
 Optional for UART:
 - reset_pin : used by UART for hardware reset, if not defined uses soft reset. It is a Pin object, not number
 
- 1. BNO08x SDA to board UARTx-RX (uart 1 ex: gpio9, uart 0 ex: gpio13)
- 2. BNO08x SCL to board UARTx-TX (uart 1 ex: gbio8, uart 0 ex: gpio12)
+1. BNO08x SDA to board UARTx-RX (uart 1 ex: gpio9, uart 0 ex: gpio13)
+2. BNO08x SCL to board UARTx-TX (uart 1 ex: gbio8, uart 0 ex: gpio12)
 3. todo ? INT Pin is required for accurate communication
 
 PS0 and PS1 are the host interface protocol selection pins, therefore UART can not use a wake pin.  In order to use UART, PS1 must be high (solder blob) and PS0/WAKE not have solder blob so it is tied to ground.
@@ -196,21 +200,23 @@ PS0 and PS1 are the host interface protocol selection pins, therefore UART can n
 
 ## Report Maximum Frequencioes
 
-| **Feature**             | **Max Frequency (Hz)** | **msec/Report** | **period we've seen** |
-|-------------------------|------------------------|-----------------|-----------------------|
-| Composite Gyro Rotation | 1000                   | 1.0 ms          | 1 ms                  |
-| Accelerometer           | 500                    | 2.0 ms          | 4, 8, 16, 32, 64...   |
-| Rotation Vector         | 400                    | 2.5 ms          |                       |
-| Gaming Rotation         | 400                    | 2.5 ms          | 5, 10, 20, 40, 50, 60 |
-| Gravity                 | 400                    | 2.5 ms          |                       |
-| Linear Acceleration     | 400                    | 2.5 ms          |                       |
-| Gyroscope               | 400                    | 2.5 ms          | 5, 10, 20, 40, 50, 60 |
-| Magnetometer            | 100                    | 10.0 ms         | 10, 20, 40, 50, 60,   |
-| Geomagnetic Rotation    | 90                     | 11.1 ms         |                       |
-| raw Gyroscope           |                        |                 | 10, 20, 40, 50, 60    |
-| raw Magnetometer        |                        |                 | 50, 60,               |
-| raw Accelerometer       |                        |                 | 32, 64, 96            |
-| (report default)        | 20                     | 50.0 ms         |                       |
+Currently, this driver supports a maximum report frequency of about 125 Hz (8ms period).
+
+| **Feature**             | **Max Frequency (Hz)** | **msec/Report** | **period we've seen**  |
+|-------------------------|------------------------|-----------------|------------------------|
+| Composite Gyro Rotation | 1000? (only 500)       | 1.0 ms          | 1 ms                   |
+| Accelerometer           | 500                    | 2.0 ms          | 2, 4, 8, 16, 32, 64... |
+| Rotation Vector         | 400                    | 2.5 ms          |                        |
+| Gaming Rotation         | 400                    | 2.5 ms          | 5, 10, 20, 40, 50, 60  |
+| Gravity                 | 400                    | 2.5 ms          |                        |
+| Linear Acceleration     | 400                    | 2.5 ms          |                        |
+| Gyroscope               | 400                    | 2.5 ms          | 5, 10, 20, 40, 50, 60  |
+| Magnetometer            | 100                    | 10.0 ms         | 10, 20, 40, 50, 60,    |
+| Geomagnetic Rotation    | 90                     | 11.1 ms         |                        |
+| raw Gyroscope           |                        |                 | 10, 20, 40, 50, 60     |
+| raw Magnetometer        |                        |                 | 50, 60,                |
+| raw Accelerometer       |                        |                 | 32, 64, 96             |
+| (report default)        | 20                     | 50.0 ms         |                        |
 
 Report frequencies should be enabled before requesting reports. To convert from period in ms to Hz (1000000/period.)
 
@@ -231,6 +237,17 @@ With a single feature, we've seen the above requested 100 Hz have the sensor rep
 
 background: https://www.youtube.com/watch?v=0rlvvYgmTvI&t=28s
 
+## Raw Reports - Be Careful
+    BNO_REPORT_RAW_ACCELEROMETER
+    BNO_REPORT_RAW_GYROSCOPE
+    BNO_REPORT_RAW_MAGNETOMETER
+
+The raw reports, which do not use sensor fusion calculations, are also implemented in this driver for acceleration,
+magnetic, and gyro sensors. It is not generally recommended to use these reports, and they require signficant math (careful
+calibaration, Kalman filters, etc.). Please read all references below when attempting to use raw reports.
+In addition, there are other sensor reports possible with the bno08x sensors that this driver has not fully
+implemented. See code and references for details. The timestamps are not well-documented in Ceva documentation.
+
 ## UART-RVC is NOT SUPPORTED by this driver (RVC, Robot Vacuum Cleaners)
 
 The BNO08X has a simplified UART interface for use on unmanned ground roving robot and robot vacuum cleaners (RVC).
@@ -249,3 +266,9 @@ The CEVA BNO085 and BNO086 9-axis sensors are made by Ceva (https://www.ceva-ip.
 -https://cdn.sparkfun.com/assets/7/6/9/3/c/Sensor-Hub-Transport-Protocol-v1.7.pdf
 
 Bosch has a new 6-axis IMU BHI385 (announced June 2025) that can be paired with BMM350 3-axis Geomagnetic sensor.
+
+## Possible Future work
+
+In order to get higher frequency reports it may be necessary to implement this driver with two cores. My thought is the
+primary core (core 0) would be running the user program and the second core (core1) would be handling the report
+processing and the communications with the bno08x.
