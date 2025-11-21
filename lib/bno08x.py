@@ -742,9 +742,7 @@ class BNO08X:
     def acceleration(self):
         self._process_available_packets()
         try:
-            print(f"acc before {self._unread_report_count[BNO_REPORT_ACCELEROMETER]}")
             self._unread_report_count[BNO_REPORT_ACCELEROMETER] = 0
-            print(f"acc clear  {self._unread_report_count[BNO_REPORT_ACCELEROMETER]}")
             x, y, z, acc, ts = self._report_values[BNO_REPORT_ACCELEROMETER]
             return SensorReading3(x, y, z, acc, ts)
         except KeyError:
@@ -779,9 +777,7 @@ class BNO08X:
         """A tuple of the current magnetic field measurements on the X, Y, and Z axes"""
         self._process_available_packets()
         try:
-            print(f"mag before {self._unread_report_count[BNO_REPORT_MAGNETOMETER]}")
             self._unread_report_count[BNO_REPORT_MAGNETOMETER] = 0
-            print(f"mag clear  {self._unread_report_count[BNO_REPORT_MAGNETOMETER]}")
             x, y, z, acc, ts = self._report_values[BNO_REPORT_MAGNETOMETER]
             return SensorReading3(x, y, z, acc, ts)
         except KeyError:
