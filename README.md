@@ -94,19 +94,19 @@ designed in the user code, they may be from a different report.
 
 The examples directory shows the use of the following sensor reports. Each of these functions use on-chip sensor fusion for accuracy.
 
-    x, y, z = bno.acceleration  # acceleration 3-tuple of x,y,z float returned
-    x, y, z = bno.linear_acceleration  # linear accel 3-tuple of x,y,z float returned
-    x, y, z = bno.gyro  # acceleration 3-tuple of x,y,z float returned
-    x, y, z = bno.magnetic  # acceleration 3-tuple of x,y,z float returned
-    roll, pitch, yaw = bno.euler  # rotation 3-tuple of x,y,z float returned
-    x, y, z = bno.gravity  # vector 3-tuple of x,y,z float returned
-    i, j, k, real = bno.quaternion  # rotation 4-tuple of i,j,k,real float returned
+    x, y, z = bno.acceleration          # acceleration 3-tuple of x,y,z float returned
+    x, y, z = bno.linear_acceleration   # linear accel 3-tuple of x,y,z float returned
+    x, y, z = bno.gyro                  # acceleration 3-tuple of x,y,z float returned
+    x, y, z = bno.magnetic              # acceleration 3-tuple of x,y,z float returned
+    roll, pitch, yaw = bno.euler        # rotation 3-tuple of x,y,z float returned
+    x, y, z = bno.gravity               # vector 3-tuple of x,y,z float returned
+    i, j, k, real = bno.quaternion      # rotation 4-tuple of i,j,k,real float returned
     i, j, k, real = bno.geomagnetic_quaternion  # rotation 4-tuple of i,j,k,real float returned
-    i, j, k, real = bno.game_quaternion  # rotation 4-tuple of i,j,k,real float returned
-    num = bno.steps  # number of steps since initialization returned
-    state = bno.shake  # boolean of state since last read returned
-    stability_str = bno.stability_classification  # string of stability classification returned
-    activity_str = bno.activity_classification  # string of activity classification returned
+    i, j, k, real = bno.game_quaternion         # rotation 4-tuple of i,j,k,real float returned
+    num = bno.steps                     # number of steps since sensor initialization returned
+    state = bno.shake                   # boolean of state since last read returned
+    stability_str = bno.stability_classification    # string of stability classification returned
+    activity_str = bno.activity_classification      # string of activity classification returned
 
 The following functions can be used to tare, calibrate, and test the sensor:
 
