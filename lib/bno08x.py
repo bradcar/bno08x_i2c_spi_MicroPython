@@ -303,17 +303,16 @@ _AVAIL_SENSOR_REPORTS = {
     BNO_REPORT_GYRO_INTEGRATED_ROTATION_VECTOR: (_Q_POINT_14_SCALAR, 4, 12),  # For testing
 }
 
-# C-style layout for all standard 16-bit BNO08x sensor reports
+# C-style layout for standard BNO08x sensor reports 16-bit
 # Offsets follow the BNO08x standard header structure
 _SENSOR_REPORT_LAYOUT = {
-    "report_id": 0 | uctypes.UINT8,  # byte 0
-    "status": 1 | uctypes.UINT8,  # byte 1
+    "report_id": 0 | uctypes.UINT8,
+    "status": 1 | uctypes.UINT8,
 
-    # byte2 contains accuracy+delay high bits
-    "byte2": 2 | uctypes.UINT8,  # byte 2
-    "byte3": 3 | uctypes.UINT8,  # byte 3 (delay low bits)
+    # byte2 contains accuracy+delay high bits, byte 3 has delay low bits
+    "byte2": 2 | uctypes.UINT8,
+    "byte3": 3 | uctypes.UINT8,
 
-    # 16-bit signed values (x,y,z or i,j,k,r)
     "v1": 4 | uctypes.INT16,
     "v2": 6 | uctypes.INT16,
     "v3": 8 | uctypes.INT16,  # valid valid for 3-tuple reports
@@ -381,7 +380,6 @@ class PacketError(Exception):
 def _elapsed_sec(start_time):
     """
     Elapsed time between now - start_time.  You pass in start_time = ticks_ms()
-
     Returns float in seconds
     """
     return ticks_diff(ticks_ms(), start_time) / 1000.0
@@ -390,12 +388,10 @@ def _elapsed_sec(start_time):
 ############ REPORT PARSING ###########################
 def _parse_sensor_report_data(report_bytes: bytearray) -> tuple[tuple, int, int]:
     """
-    Fast uctypes-based parser for standard BNO08x sensor reports, sensor data starts at offset=4
+    uctypes-based parser for BNO08x sensor reports, sensor data starts at offset=4
     Parses 3-tuple vectors, 4-tuple quaternions, and 5-tuple ARVR rotation.
     """
-    # Create a struct overlay on top of the raw buffer
     s = uctypes.struct(uctypes.addressof(report_bytes), _SENSOR_REPORT_LAYOUT, uctypes.LITTLE_ENDIAN)
-
     report_id = s.report_id
     scalar, count, _ = _AVAIL_SENSOR_REPORTS[report_id]
 
@@ -439,14 +435,12 @@ def _parse_sensor_id(buffer: bytearray) -> tuple[int, ...]:
     """Parse the fields of a product id report"""
     if not buffer[0] == _SHTP_REPORT_PRODUCT_ID_RESPONSE:
         raise AttributeError(f"Wrong report id for sensor id: {hex(buffer[0])}")
-
     reset_cause = unpack_from("<B", buffer, 1)[0]
     sw_major = unpack_from("<B", buffer, 2)[0]
     sw_minor = unpack_from("<B", buffer, 3)[0]
     sw_part_number = unpack_from("<I", buffer, 4)[0]
     sw_build_number = unpack_from("<I", buffer, 8)[0]
     sw_patch = unpack_from("<H", buffer, 12)[0]
-
     return reset_cause, sw_part_number, sw_major, sw_minor, sw_patch, sw_build_number
 
 
@@ -502,24 +496,19 @@ class Packet:
         if self.channel_number in {_BNO_CHANNEL_CONTROL, _BNO_CHANNEL_INPUT_SENSOR_REPORTS, }:
             if self.report_id in reports:
                 outstr += f"DBG::\t\t Report Type: {reports[self.report_id]} ({hex(self.report_id)})\n"
-
             else:
                 outstr += f"DBG::\t\t \t** UNKNOWN Report Type **: {hex(self.report_id)}\n"
-
             if self.report_id == 0xFC and len(self.data) >= 6 and self.data[1] in reports:
                 outstr += f"DBG::\t\t Enabled Feature: {reports[self.data[1]]} ({hex(self.data[1])})\n"
                 outstr += f"DBG::\t\t Sequence number: {self.header.sequence_number}\n"
-        outstr += "\n"
-        outstr += "DBG::\t\tData:"
+        outstr += "\nDBG::\t\tData:"
 
         for idx, packet_byte in enumerate(self.data[:length]):
             packet_index = idx + 4
             if (packet_index % 4) == 0:
                 outstr += f"\nDBG::\t\t[0x{packet_index:02X}] "
             outstr += f"0x{packet_byte:02X} "
-        outstr += "\n"
-        outstr += "\t\t*******************************\n"
-
+        outstr += "\n\t\t*******************************\n"
         return outstr
 
     @property
@@ -541,14 +530,12 @@ class Packet:
         sequence_number = header_data[2]
         
         data_length = max(0, packet_byte_count - 4)
-
         header = PacketHeader(channel_number, sequence_number, data_length, packet_byte_count)
         return header
 
     @classmethod
     def is_error(cls, header: PacketHeader) -> bool:
         """Returns True if the header is an error condition"""
-
         if header.channel_number > 5:
             return True
         if header.packet_byte_count == 0xFFFF and header.sequence_number == 0xFF:
@@ -576,7 +563,7 @@ class BNO08X:
         self._int_pin = int_pin
         self._wake_pin = wake_pin
         self._cs_pin = cs_pin
-        self._dbg("********** __init__ *************")
+        self._dbg("********** __init__ on {_interface} Interface *************\n")
         self._data_buffer: bytearray = bytearray(DATA_BUFFER_SIZE)
         self._data_buffer_memoryview = memoryview(self._data_buffer)
         self._command_buffer: bytearray = bytearray(12)
@@ -605,7 +592,6 @@ class BNO08X:
 
         self.reset_sensor()
         self._dbg("********** End __init__ *************\n")
-        self._dbg(f"Interface is {_interface}\n")
 
         # Active-low interrupt → falling edge
         self._int_pin.irq(trigger=Pin.IRQ_FALLING, handler=self._on_interrupt)
@@ -756,7 +742,6 @@ class BNO08X:
     @property
     def shake(self):
         """True if a shake was detected on any axis since the last time it was checked
-
         This property has a "latching" behavior where once a shake is detected, it will stay in a
         "shaken" state until the value is read. This prevents missing shake events but means that
         this property is not guaranteed to reflect the shake state at the moment it is read
@@ -774,7 +759,6 @@ class BNO08X:
     @property
     def stability_classification(self):
         """Returns the sensor's assessment of its current stability, one of:
-
         * "Unknown" - The sensor is unable to classify the current stability
         * "On Table" - The sensor is at rest on a stable surface with very little vibration
         * "Stationary" -  The sensor’s motion is below the stable threshold but\
@@ -782,7 +766,6 @@ class BNO08X:
         gyro calibration is enabled
         * "Stable" - The sensor’s motion has met the stable threshold and duration requirements.
         * "In motion" - The sensor is moving.
-
         """
         self._process_available_packets()
         try:
@@ -795,7 +778,6 @@ class BNO08X:
     def activity_classification(self):
         """Returns the sensor's assessment of the activity that is creating the motions\
         that it is sensing, one of:
-
         * "Unknown"
         * "In-Vehicle"
         * "On-Bicycle"
@@ -805,7 +787,6 @@ class BNO08X:
         * "Walking"
         * "Running"
         * "On Stairs"
-
         """
         self._process_available_packets()
         try:
@@ -951,7 +932,6 @@ class BNO08X:
         return flag
 
 
-
     def _wait_for_packet_type(self, channel, timeout=3.0):
         """
         Wait for a packet from the specified channel.
@@ -1007,52 +987,6 @@ class BNO08X:
         seq = new_packet.header.sequence_number
         self._rx_sequence_number[channel] = seq
 
-    #     def _handle_packet(self, packet):
-    #         """
-    #         Split a single packet into multiple reports and process them in FIFO order.
-    #         Handles multiple 0xF8 Product ID Response reports correctly.
-    #         """
-    #         # Use memoryview of the packet data once at the start, if it's not already one.
-    #         data_view = memoryview(packet.data)
-    #
-    #         try:
-    #             next_byte_index = 0
-    #             slices = [] # Now holds (report_id, memoryview_slice) tuples
-    #
-    #             while next_byte_index < packet.header.data_length:
-    #                 report_id = packet.data[next_byte_index]
-    #
-    #                 if report_id < 0xF0:
-    #                     required_bytes = _AVAIL_SENSOR_REPORTS[report_id][2]
-    #                 else:
-    #                     required_bytes = _REPORT_LENGTHS.get(report_id, 0)
-    #                     if required_bytes == 0:
-    #                         self._dbg(f"Unknown report_id {hex(report_id)}, skipping 1 byte")
-    #                         next_byte_index += 1
-    #                         continue
-    #
-    #                 unprocessed_byte_count = packet.header.data_length - next_byte_index
-    #                 if unprocessed_byte_count < required_bytes:
-    #                     self._dbg(f"Unprocessable batch ERROR: skipping ! {unprocessed_byte_count} bytes")
-    #                     break
-    #
-    #                 # CRITICAL CHANGE: Create a memoryview slice (no data copy)
-    #                 report_view = data_view[next_byte_index: next_byte_index + required_bytes]
-    #
-    #                 # Append (report_id, memoryview_slice)
-    #                 slices.append([report_view[0], report_view])
-    #                 next_byte_index += required_bytes
-    #
-    #             self._dbg(f"HANDLING {len(slices)} PACKET{'S' if len(slices) > 1 else ''}...")
-    #             # Process in FIFO order
-    #             for report_id, report_bytes in slices:
-    #                 self._dbg("")
-    #                 # report_bytes is now a memoryview, which is compatible with unpack_from
-    #                 self._process_report(report_id, report_bytes)
-    #
-    #         except Exception as error:
-    #             self._dbg(f"Handle Packet: Packet bytes:{[hex(b) for b in packet.data[:4]]}...")
-    #             raise
 
     def _handle_packet(self, packet):
         """
@@ -1111,7 +1045,7 @@ class BNO08X:
             self._dbg(f"Base Timestamp (0xfb): {self._last_base_timestamp_us} usec")
             return
 
-            # Timestamp Rebase (0xfa), see this when _BASE_TIMESTAMP wraps so use this instead
+        # Timestamp Rebase (0xfa), see this when _BASE_TIMESTAMP wraps so use this instead
         if report_id == _TIMESTAMP_REBASE:
             self._last_base_timestamp_us = unpack_from("<I", report_bytes, 1)[0] * 100
             self._dbg(f"Timestamp Rebase (0xfa): {self._last_base_timestamp_us} usec")
@@ -1207,7 +1141,7 @@ class BNO08X:
             return
 
         if report_id == BNO_REPORT_SHAKE_DETECTOR:
-            # 16-bit shake bitfield, Mask for X, Y, Z axes (0x07)
+            # shake in X, Y, or Z axes (mask lower 3 bits: 0x07)
             shake_bitfield = unpack_from("<H", report_bytes, 4)[0]
             shake_detected = (shake_bitfield & 0x07) != 0
 
@@ -1263,9 +1197,7 @@ class BNO08X:
         # TODO fix for ARVR 4-tuple and ARVR 5-tuple for ARVR-Stabilized Rotation Vector (0x28)
         sensor_data, accuracy, delay_us = _parse_sensor_report_data(report_bytes)
         self._dbg(f"Report: {reports[report_id]}\nData: {sensor_data}, {accuracy=}, {delay_us=}")
-
         self._sensor_timestamp = self.last_interrupt_us - self._last_base_timestamp_us + delay_us
-
         self._report_values[report_id] = sensor_data
         return
 
@@ -1279,7 +1211,6 @@ class BNO08X:
         await GET_FEATURE_RESPONSE (0xfc)
         """
         self._dbg(f"ENABLING FEATURE ID... {hex(feature_id)}")
-
         set_feature_report = bytearray(17)
         set_feature_report[0] = _SET_FEATURE_COMMAND
         set_feature_report[1] = feature_id
@@ -1417,9 +1348,6 @@ class BNO08X:
         if self._debug:
             print("DBG::\t\t", *args, **kwargs)
 
-    @property
-    def _data_ready(self) -> None:
-        raise RuntimeError("Not implemented")
 
     def hard_reset(self) -> None:
         """Hardware reset the sensor to an initial unconfigured state"""
@@ -1467,3 +1395,13 @@ class BNO08X:
 
     def _get_report_seq_id(self, report_id: int) -> int:
         return self._two_ended_sequence_numbers.get(report_id, 0)
+
+    # TODO add to I2C and UART
+    @property
+    def _data_ready(self):
+        """
+        Returns True if at least one new interrupt seen based on timestamps
+        """
+        if self.last_interrupt_us != self.prev_interrupt_us:
+            return True
+        return False
