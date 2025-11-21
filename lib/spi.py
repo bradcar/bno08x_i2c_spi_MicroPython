@@ -50,31 +50,29 @@ class BNO08X_SPI(BNO08X):
         self._spi = spi_bus
         self._spi.init(baudrate=baudrate, polarity=1, phase=1)
         _interface = "SPI"
-
-        if cs_pin is None:
-            raise RuntimeError("cs_pin is required for SPI operation")
-
-        if not isinstance(cs_pin, Pin):
-            raise TypeError("cs_pin must be a Pin object, not Pin number")
-
-        self._cs = cs_pin
-        self._cs.value(1) # ensure CS is de-asserted by default
-        
-        if int_pin is None:
-            raise RuntimeError("int_pin is required for SPI operation")
-
-        if not isinstance(int_pin, Pin):
-            raise TypeError("int_pin must be a Pin object, not Pin number")
         
         if wake_pin is None:
             raise RuntimeError("wake_pin is required for SPI operation")
-
         if not isinstance(wake_pin, Pin):
             raise TypeError("wake_pin must be a Pin object, not Pin number")
-        
-        self._int = int_pin
         self._wake = wake_pin
-        self._wake.value(1)
+        self._wake.value(1) # wake_pin must be high to select SPI operation
+
+        if cs_pin is None:
+            raise RuntimeError("cs_pin is required for SPI operation")
+        if not isinstance(cs_pin, Pin):
+            raise TypeError("cs_pin must be a Pin object, not Pin number")
+        self._cs = cs_pin
+        self._cs.value(1) # ensure CS is de-asserted before communication
+        
+        if int_pin is None:
+            raise RuntimeError("int_pin is required for SPI operation")
+        if not isinstance(int_pin, Pin):
+            raise TypeError("int_pin must be a Pin object, not Pin number")
+        self._int = int_pin
+
+        if reset_pin is not None and not isinstance(reset_pin, Pin):
+            raise TypeError(f"Reset (RST) pin must be a 'machine.Pin' object or None, not {type(rst_pin)}.")
         self._reset = reset_pin
 
         super().__init__(_interface, reset_pin=reset_pin, int_pin=int_pin, cs_pin=cs_pin, wake_pin=wake_pin, debug=debug)

@@ -11,6 +11,7 @@ Subclass of `BNO08X` to use I2C
 from struct import pack_into
 
 from micropython import const
+from machine import Pin
 
 from bno08x import BNO08X, Packet, PacketError, DATA_BUFFER_SIZE
 
@@ -24,9 +25,16 @@ class BNO08X_I2C(BNO08X):
     def __init__(self, i2c_bus, address=_BNO08X_DEFAULT_ADDRESS, reset_pin=None, int_pin=None, debug=False):
         self._i2c = i2c_bus
         _interface = "I2C"
-        #todo should I do the following
-        # self._reset = reset_pin
-        # self._int = int_pin
+
+        if int_pin is None:
+            raise RuntimeError("int_pin is required for I2C operation")
+        if not isinstance(int_pin, Pin):
+            raise TypeError("int_pin must be a Pin object, not Pin number")
+        self._int = int_pin
+
+        if reset_pin is not None and not isinstance(reset_pin, Pin):
+            raise TypeError(f"Reset (RST) pin must be a 'machine.Pin' object or None, not {type(rst_pin)}.")
+        self._reset = reset_pin
 
         self._bno_i2c_addr = address if address is not None else _BNO08X_DEFAULT_ADDRESS
 
@@ -41,6 +49,7 @@ class BNO08X_I2C(BNO08X):
         pack_into("<H", self._data_buffer, 0, write_length)
         self._data_buffer[2] = channel
         self._data_buffer[3] = self._tx_sequence_number[channel]
+        # TODO: write as one block:  self._data_buffer[4:write_length] = data
         for idx, send_byte in enumerate(data):
             self._data_buffer[4 + idx] = send_byte
         packet = Packet(self._data_buffer)
@@ -49,7 +58,6 @@ class BNO08X_I2C(BNO08X):
 
         self._i2c.writeto(self._bno_i2c_addr, self._data_buffer[:write_length])
 
-        #todo is this right place for rx update? is this rx or tx?
         self._tx_sequence_number[channel] = (self._tx_sequence_number[channel] + 1) % 256
         return self._tx_sequence_number[channel]
 

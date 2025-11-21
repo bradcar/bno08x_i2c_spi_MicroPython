@@ -39,6 +39,7 @@ In UART mode, the BNO08X sends an advertisement message when it is ready to comm
 from struct import pack_into
 
 from utime import sleep_ms, sleep_us, ticks_ms
+from machine import Pin
 
 from bno08x import BNO08X, Packet, PacketError, DATA_BUFFER_SIZE, _elapsed_sec
 
@@ -50,11 +51,18 @@ class BNO08X_UART(BNO08X):
 
     def __init__(self, uart, reset_pin=None, int_pin=None, debug=False):
         self._uart = uart
-        self._reset = reset_pin
-        self._int = int_pin
         _interface = "UART"
+        
+        if int_pin is None:
+            raise RuntimeError("int_pin is required for SPI operation")
+        if not isinstance(int_pin, Pin):
+            raise TypeError("int_pin must be a Pin object, not Pin number")
+        self._int = int_pin
+        
+        if reset_pin is not None and not isinstance(reset_pin, Pin):
+            raise TypeError(f"Reset (RST) pin must be a 'machine.Pin' object or None, not {type(rst_pin)}.")
+        self._reset = reset_pin
 
-        # wake_pin must be NONE!  wake_pin/PS0 = 0 (gnd)
         super().__init__(_interface, reset_pin=reset_pin, int_pin=int_pin, cs_pin=None, wake_pin=None, debug=debug)
 
     def _send_packet(self, channel, data):
@@ -164,6 +172,7 @@ class BNO08X_UART(BNO08X):
             raise RuntimeError("Didn't find packet end")
 
         new_packet = Packet(self._data_buffer)
+        self._dbg(f"{new_packet=}")
         self._update_sequence_number(new_packet)
 
         return new_packet
@@ -208,7 +217,7 @@ class BNO08X_UART(BNO08X):
 
                 packet = self._read_packet()
                 self._handle_packet(packet)
-                self._dbg(f"Initial packet, Channel {packet.channel_number} (Seq {packet.header.sequence_number}).")
+                self._dbg(f"Initial packet, Channel {packet.channel_number} (Seq {packet.sequence_number}).")
 
             except (RuntimeError, PacketError):
                 # expected end-of-burst condition (timeout, no more data)
@@ -263,7 +272,7 @@ class BNO08X_UART(BNO08X):
 
                 packet = self._read_packet()
                 self._handle_packet(packet)
-                self._dbg(f"Initial packet, Channel {packet.channel_number} (Seq {packet.header.sequence_number}).")
+                self._dbg(f"Initial packet, Channel {packet.channel_number} (Seq {packet.sequence_number}).")
 
             except (RuntimeError, PacketError):
                 # expected end-of-burst condition (timeout, no more data)
