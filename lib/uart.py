@@ -140,15 +140,9 @@ class BNO08X_UART(BNO08X):
         channel = header.channel_number
         sequence_number = header.sequence_number
 
-        # Check channel validity
-        if channel >= len(self._rx_sequence_number):
-            raise PacketError(f"Invalid channel number: {channel} {self._data_buffer[:4]=}")
-
         self._rx_sequence_number[channel] = sequence_number
         if packet_byte_count == 0:
             raise PacketError("No packet available")
-
-        self._dbg("channel %d has %d bytes available" % (channel, packet_byte_count - 4))
 
         if packet_byte_count > DATA_BUFFER_SIZE:
             self._data_buffer = bytearray(packet_byte_count)
@@ -162,15 +156,8 @@ class BNO08X_UART(BNO08X):
 
         b = data[0]
 
-        # Check for escape sequence
-        if b == 0x7D:
-            data = self._uart.read(1)
-            if not data:
-                raise RuntimeError("Timeout while waiting for escaped end byte")
-            b = data[0] ^ 0x20  # Un-escape the byte
-
         if b != 0x7E:
-            raise RuntimeError("Didn't find packet end")
+            raise RuntimeError(f"_read_packet: Didn't find packet end (Received {hex(b)})")
 
         new_packet = Packet(self._data_buffer)
         self._dbg(f"{new_packet=}")

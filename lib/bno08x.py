@@ -36,13 +36,17 @@ Delay
    the delay field may be populated, then delay and the timebase reference
    are used to calculate the sensor sample's actual timestamp.
 
+TODO: debug soft reset for SPI
 TODO: retest CALIBRATION
-TODO: BRC test UART with Reset & Interrupt pins
+
+TODO: BRC test i2c with Reset & Interrupt pins 
+TODO: BRC test UART with Reset & Interrupt pins 
 
 TODO: updating sensor values more efficiently
 
 TODO: BRC Euler/quaternion implementation
 TODO: BRC add TARE
+
 """
 
 __version__ = "0.1"
@@ -1051,7 +1055,6 @@ class BNO08X:
         If _read_packet() does not return all data for one interrupt,
         we may need a “drain loop” until no more packets exist.
         """
-        print(f"begin enable{self._unread_report_count=}")
         processed_count = 0
         start_time = ticks_ms()
 
@@ -1075,7 +1078,7 @@ class BNO08X:
 
         flag = processed_count > 0
         self._dbg(f"_process_available_packets done, {processed_count} packets processed - {flag}")
-        print(f"end   enable{self._unread_report_count=}")
+        print(f"proc_avail_packets: {self._unread_report_count}")
         return flag
 
 
@@ -1274,7 +1277,7 @@ class BNO08X:
 
             self._sensor_us = self.last_interrupt_us - self._last_base_timestamp_us + delay_us
             print(
-                f"sensor timestamp={self._sensor_us} {(self.last_interrupt_us - self.prev_interrupt_us) / 1000.0} ms")
+                f"sensor irq= {(self.last_interrupt_us - self.prev_interrupt_us) / 1000.0} ms")
 
             if report_id == BNO_REPORT_MAGNETOMETER:
                 self._magnetometer_accuracy = accuracy
