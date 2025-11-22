@@ -36,17 +36,13 @@ Delay
    the delay field may be populated, then delay and the timebase reference
    are used to calculate the sensor sample's actual timestamp.
 
-TODO: debug soft reset for SPI
 TODO: retest CALIBRATION
-
-TODO: BRC test i2c with Reset & Interrupt pins 
-TODO: BRC test UART with Reset & Interrupt pins 
+TODO: BRC test UART with Reset & Interrupt pins
 
 TODO: updating sensor values more efficiently
 
 TODO: BRC Euler/quaternion implementation
 TODO: BRC add TARE
-
 """
 
 __version__ = "0.1"
