@@ -640,6 +640,10 @@ class BNO08X:
         self._int_pin = int_pin
         self._wake_pin = wake_pin
         self._cs_pin = cs_pin
+        
+        # set int_pin interrupt, Active-low interrupt → falling edge
+        self._int_pin.irq(trigger=Pin.IRQ_FALLING, handler=self._on_interrupt)
+        
         self._dbg(f"********** __init__ on {_interface} Interface *************\n")
         self._data_buffer: bytearray = bytearray(DATA_BUFFER_SIZE)
         self._data_buffer_memoryview = memoryview(self._data_buffer)
@@ -660,7 +664,7 @@ class BNO08X:
         self._calibration_complete = False
         self._magnetometer_accuracy = 0
         self._wait_for_initialize = True
-        self._init_complete = False
+        self._data_available = False
         self._id_read = False
         self._reset_mismatch = False
         self._quaternion_euler_vector = BNO_REPORT_GAME_ROTATION_VECTOR  # default can change with set_quaternion_euler
@@ -670,9 +674,6 @@ class BNO08X:
         self._unread_report_count = {}
         self._report_periods_dictionary_us = {}
 
-        # set int_pin interrupt, Active-low interrupt → falling edge
-        self._int_pin.irq(trigger=Pin.IRQ_FALLING, handler=self._on_interrupt)
-        
         self.reset_sensor()
         
         # significant spi, i2c, or uart by now, if int_pin interrupt thenraise error
@@ -690,6 +691,7 @@ class BNO08X:
         """
         self.prev_interrupt_us = self.last_interrupt_us
         self.last_interrupt_us = ticks_us()
+        self._data_available = True
 
     def reset_sensor(self):
         if self._reset_pin:
@@ -704,7 +706,6 @@ class BNO08X:
                 if self._check_id() and not self._reset_mismatch:
                     self._dbg(f"*** {reset_type} reset successful, acknowledged with 0xF8 response")
                     sleep_ms(100)  # allow SHTP time to settle
-                    self._init_complete = True
                     # Reset tx and rx sequence numbers, BNO08X initially sets sequence numbers to 0 after boot.
                     self._tx_sequence_number = [0, 0, 0, 0, 0, 0]
                     self._rx_sequence_number = [0, 0, 0, 0, 0, 0]
