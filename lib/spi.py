@@ -49,6 +49,7 @@ class BNO08X_SPI(BNO08X):
         # BNO08X Datasheet (1.2.4.2 SPI) requires CPOL = 1 and CPHA = 1, which is: polarity=1 and phase=1
         self._spi = spi_bus
         self._spi.init(baudrate=baudrate, polarity=1, phase=1)
+        self._debug = debug
         _interface = "SPI"
         
         if wake_pin is None:
@@ -74,7 +75,7 @@ class BNO08X_SPI(BNO08X):
         if reset_pin is not None and not isinstance(reset_pin, Pin):
             raise TypeError(f"reset_pin (RST) must be a Pin object or None, not {type(reset_pin)}")
         self._reset = reset_pin
-
+        
         super().__init__(_interface, reset_pin=reset_pin, int_pin=int_pin, cs_pin=cs_pin, wake_pin=wake_pin, debug=debug)
 
 
@@ -220,7 +221,7 @@ class BNO08X_SPI(BNO08X):
         mv[4:4+data_length] = data
 
         self._cs.value(0)
-        sleep_us(1)
+        sleep_us.value(1)
         self._spi.write(mv[:write_length])  # also zero-copy
         self._cs.value(1)
 
