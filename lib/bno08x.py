@@ -36,17 +36,15 @@ Delay
    the delay field may be populated, then delay and the timebase reference
    are used to calculate the sensor sample's actual timestamp.
 
-TODO: debug soft reset for SPI
-TODO: retest CALIBRATION
+TODO: BRC updating sensor values more efficiently
 
-TODO: BRC test i2c with Reset & Interrupt pins 
-TODO: BRC test UART with Reset & Interrupt pins 
+TODO: BRC figure out read wait, is this needed?
 
-TODO: updating sensor values more efficiently
+TODO: BRC fix UART mis-framing (with quaternions?)
+TODO: BRC test UART with Reset & Interrupt pins
 
-TODO: BRC Euler/quaternion implementation
+TODO: BRC retest CALIBRATION
 TODO: BRC add TARE
-
 """
 
 __version__ = "0.1"
@@ -60,9 +58,6 @@ from collections import namedtuple
 from machine import Pin
 from micropython import const
 from utime import ticks_us, ticks_ms, ticks_diff, sleep_ms, sleep_us
-
-# import support files
-
 
 # Commands
 BNO_CHANNEL_SHTP_COMMAND = const(0)
@@ -312,8 +307,8 @@ _SENSOR_REPORT_LAYOUT = {
     "v1": 4 | uctypes.INT16,
     "v2": 6 | uctypes.INT16,
     "v3": 8 | uctypes.INT16,  # valid valid for 3-tuple reports
-    "v4": 10 | uctypes.INT16,  # only valid for Game rotation vector quaternion reports
-    "e1": 12 | uctypes.INT16,  # only valid for rotation & ARVR rotation report: quaternion + estimate
+    "v4": 10 | uctypes.INT16,  # only valid for 4-tuple reports (quaternion)
+    "e1": 12 | uctypes.INT16,  # only valid for rotation & ARVR rotation report: quaternion + angle estimate
 }
 
 _INITIAL_REPORTS = {
@@ -552,7 +547,14 @@ class SensorReading3:
         )
 
 class SensorReading4:
-    """4-element reading with optional metadata."""
+    """
+    4-element reading with optional metadata.
+    two reports are really SensorReading5 reports, few users need the est so we process it here in SensorReading4
+    bno.quaternion (BNO_REPORT_ROTATION_VECTOR) is actually 5-tuple, we ignore estimated angle
+    bno.geomagnetic_quaternion(BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR): is actually 5-tuple, we ignore estimated angle
+    FUTURE: Explore if this estimated angle is needed and how to expose it simply to both allow simple usage
+            and this capability for advanced users
+    """
     __slots__ = ("v1", "v2", "v3", "v4", "accuracy", "timestamp_us")
 
     def __init__(self, v1, v2, v3, v4, accuracy, timestamp_us):
@@ -574,8 +576,18 @@ class SensorReading4:
         return self.accuracy, self.timestamp_us
 
     @property
+    def euler(self):
+        roll, pitch, yaw = euler_conversion(self.v1, self.v2, self.v3, self.v4)
+        return roll, pitch, yaw
+
+    @property
     def full(self):
         return self.v1, self.v2, self.v3, self.v4, self.accuracy, self.timestamp_us
+
+    @property
+    def euler_full(self):
+        roll, pitch, yaw = euler_conversion(self.v1, self.v2, self.v3, self.v4)
+        return roll, pitch, yaw, self.accuracy, self.timestamp_us
 
     def __repr__(self):
         return (
@@ -584,7 +596,10 @@ class SensorReading4:
         )
 
 class SensorReading5:
-    """5-element reading with optional metadata."""
+    """
+    5-element reading with optional metadata.
+    TODO: process ARVR rotation and full quaternion implementation wth estimated angle
+    """
     __slots__ = ("v1", "v2", "v3", "v4", "e1", "accuracy", "timestamp_us")
 
     def __init__(self, v1, v2, v3, v4, e1, accuracy, timestamp_us):
@@ -616,6 +631,7 @@ class SensorReading5:
             f"Sensor 5-tuple(v1={self.v1}, v2={self.v2}, v3={self.v3}, v4={self.v4}, e1={self.e1},"
             f"accuracy={self.accuracy}, timestamp_us={self.timestamp_us})"
         )
+
 
 class BNO08X:
     """Library for the BNO08x IMUs from Hillcrest Laboratories
@@ -665,7 +681,6 @@ class BNO08X:
         self._data_available = False
         self._id_read = False
         self._reset_mismatch = False  # if reset_pin set make sure hardware reset done, else pin bad
-        self._quaternion_euler_vector = BNO_REPORT_GAME_ROTATION_VECTOR  # default can change with set_quaternion_euler
         # dictionary of most recent values from each enabled sensor report
         self._report_values = {}
         # dictionary of reports received but not yet read by user
@@ -807,45 +822,17 @@ class BNO08X:
         except KeyError:
             raise RuntimeError("raw magnetic report not enabled, use enable_feature") from None
 
-    @property
-    def euler(self):
-        # A 3-tuple representing the current Roll, Tilt, and Yaw euler angle in degree
-        # q[4] is accuracy, and q[5] is timestamp_us
-        self._process_available_packets()
-        try:
-            self._unread_report_count[self._quaternion_euler_vector] = 0
-            q = self._report_values[self._quaternion_euler_vector]
-        except KeyError:
-            raise RuntimeError("quaternion report not enabled, use enable_feature") from None
-
-        jsqr = q[1] * q[1]
-        t0 = +2.0 * (q[3] * q[0] + q[1] * q[2])
-        t1 = +1.0 - 2.0 * (q[0] * q[0] + jsqr)
-        roll = degrees(atan2(t0, t1))
-
-        t2 = +2.0 * (q[3] * q[1] - q[2] * q[0])
-        t2 = +1.0 if t2 > +1.0 else t2
-        t2 = -1.0 if t2 < -1.0 else t2
-        tilt = degrees(asin(t2))
-
-        t3 = +2.0 * (q[3] * q[2] + q[0] * q[1])
-        t4 = +1.0 - 2.0 * (jsqr + q[2] * q[2])
-        yaw = degrees(atan2(t3, t4))
-
-        return SensorReading3(roll, tilt, yaw, q[4], q[5])
-
     # 4-Tuple Sensor Reports + accuracy + timestamp
     @property
     def quaternion(self):
         """A quaternion representing the current rotation vector"""
         self._process_available_packets()
         try:
-            # TODO BRC understand
-            self._unread_report_count[self._quaternion_euler_vector] = 0
-            i, j, k, r, acc, ts = self._report_values[self._quaternion_euler_vector]
+            self._unread_report_count[BNO_REPORT_ROTATION_VECTOR] = 0
+            i, j, k, r, acc, ts = self._report_values[BNO_REPORT_ROTATION_VECTOR]
             return SensorReading4(i, j, k, r, acc, ts)
         except KeyError:
-            raise RuntimeError("quaternion report not enabled, use enable_feature") from None
+            raise RuntimeError("quaternion report not enabled, use bno.enable_feature(BNO_REPORT_ROTATION_VECTOR)") from None
 
     @property
     def geomagnetic_quaternion(self):
@@ -856,21 +843,20 @@ class BNO08X:
             i, j, k, r, acc, ts = self._report_values[BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR]
             return SensorReading4(i, j, k, r, acc, ts)
         except KeyError:
-            raise RuntimeError("geomagnetic quaternion report not enabled, use enable_feature") from None
+            raise RuntimeError("geomagnetic quaternion report not enabled, use bno.enable_feature(BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR)") from None
 
     @property
     def game_quaternion(self):
-        """A quaternion representing the current rotation vector expressed as a quaternion with no
-        specific reference for heading, while roll and pitch are referenced against gravity. To
-        prevent sudden jumps in heading due to corrections, the `game_quaternion` property is not
-        corrected using the magnetometer. Some drift is expected"""
+        """A quaternion representing the current rotation vector with no specific reference for heading,
+        while roll and pitch are referenced against gravity. To  prevent sudden jumps in heading due to corrections,
+        the `game_quaternion` property is not corrected using the magnetometer. Drift is expected ! """
         self._process_available_packets()
         try:
             self._unread_report_count[BNO_REPORT_GAME_ROTATION_VECTOR] = 0
             i, j, k, r, acc, ts = self._report_values[BNO_REPORT_GAME_ROTATION_VECTOR]
             return SensorReading4(i, j, k, r, acc, ts)
         except KeyError:
-            raise RuntimeError("game quaternion report not enabled, use enable_feature") from None
+            raise RuntimeError("game quaternion report not enabled, use bno.enable_feature(BNO_REPORT_GAME_ROTATION_VECTOR)") from None
 
     # Other Sensor Reports
     @property
@@ -887,7 +873,7 @@ class BNO08X:
     def shake(self):
         """True if a shake was detected on any axis since the last time it was checked
         State is "latched" once a shake is detected, it stays in "shaken" state until the value is read.
-        This prevents missing shake events, but it not guaranteed to reflect current shake state.
+        This prevents missing shake events, but it is not guaranteed to reflect current shake state.
         """
         self._process_available_packets()
         try:
@@ -937,6 +923,32 @@ class BNO08X:
             return activity_classification
         except KeyError:
             raise RuntimeError("activity classification report not enabled, use enable_feature") from None
+
+    @staticmethod
+    def euler_conversion(i, j, k, r):
+        """
+        Converts quaternion values to Euler angles to degrees.
+        :param k: quaternion component value
+        :param j: quaternion component value
+        :param i: quaternion component value
+        :param r: quaternion component value
+        :return: roll, pitch, yaw component values in degrees
+        """
+        jsqr = j * j
+        t0 = 2.0 * (r * i + j * r)
+        t1 = 1.0 - 2.0 * (i * i + jsqr)
+        roll = degrees(atan2(t0, t1))
+
+        t2 = 2.0 * (r * j - k * i)
+        t2 = 1.0 if t2 > +1.0 else t2
+        t2 = -1.0 if t2 < -1.0 else t2
+        tilt = degrees(asin(t2))
+
+        t3 = 2.0 * (r * k + i * j)
+        t4 = 1.0 - 2.0 * (jsqr + k * k)
+        yaw = degrees(atan2(t3, t4))
+
+        return roll, tilt, yaw
 
     def begin_calibration(self) -> None:
         """Begin the sensor's self-calibration routine"""
@@ -1451,9 +1463,6 @@ class BNO08X:
 
         self._send_packet(BNO_CHANNEL_CONTROL, set_orientation)
 
-    def set_quaternion_euler_vector(self, feature_id):
-        self._quaternion_euler_vector = feature_id
-        return
 
     def _check_id(self):
         """
@@ -1579,3 +1588,6 @@ class BNO08X:
         if self.last_interrupt_us != self.prev_interrupt_us:
             return True
         return False
+
+# must define alias after BNO08X class, so class SensorReading4 class can use this
+euler_conversion = BNO08X.euler_conversion

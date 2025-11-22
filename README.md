@@ -42,7 +42,7 @@ Optional parameters:
 
 Optional for I2C:
 - reset_pin : will allow ability to do hardware reset, if not defined uses soft reset. It is a Pin object, not number
-- debug : print very detailed logs, mainly for debugging driver.
+- debug : print very detailed logs, primarily for driver debug & development.
 
 Maximum for i2c is 400_000 (400kbs). PS0 (Wake_pin) and PS1 are used to select I2C, therefore I2C can not use wake pin.
 To use I2C, both PS0 and PS1 can not have solder blobs which means both are tied to ground.
@@ -68,7 +68,7 @@ Primary sensor reports:
         BNO_REPORT_STABILITY_CLASSIFIER
         BNO_REPORT_ACTIVITY_CLASSIFIER
 
-BNO Sensor documentation uses the words "ROTATION_VECTOR", and we honor that in several constants. Most people refer
+BNO Sensor documentation uses the words "ROTATION_VECTOR", and we honor that in several constants above. Most people refer
 to these as quaternions, which makes coding easier, so in this code we use bno.quaternion and enable it with
 "BNO_REPORT_ROTATION_VECTOR" and likewise use bno.game_quaternion and enable it with "BNO_REPORT_GAME_ROTATION_VECTOR".
 
@@ -94,6 +94,13 @@ Metadata on the accuracy and the usec-accurate timestamp can also be separately 
 designed in the user code, they may be from a different report.
 
     accuracy, timestamp_us = bno.acceleration.meta
+
+If you are using quaternions for various processing and at a later time you want to convert to an euler angle (degrees),
+you can use the following:
+
+    i, j, k, r = bno.quaternion
+    # ...various quaternion processing
+    roll, pitch, yaw = euler_conversion(i, j, k, r)
 
 **Examples of other sensor reports**
 
