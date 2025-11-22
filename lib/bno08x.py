@@ -103,15 +103,15 @@ _ME_CAL_CONFIG = const(0x00)
 _ME_GET_CAL = const(0x01)
 
 # Reports Summary depending on BNO device
-BNO_REPORT_ACCELEROMETER = const(0x01)  # Calibrated Acceleration (m/s2)
-BNO_REPORT_GYROSCOPE = const(0x02)  # Calibrated gyroscope (rad/s).
-BNO_REPORT_MAGNETOMETER = const(0x03)  # Magnetic field calibrated (in µTesla).
-BNO_REPORT_LINEAR_ACCELERATION = const(0x04)  # Linear acceleration (m/s2) with gravity removed
-BNO_REPORT_ROTATION_VECTOR = const(0x05)  # Rotation Vector
-BNO_REPORT_GRAVITY = const(0x06)  # Gravity Vector (m/s2). Vector direction of gravity
+BNO_REPORT_ACCELEROMETER = const(0x01)  # bno.acceleration (m/s^2, gravity acceleration included)
+BNO_REPORT_GYROSCOPE = const(0x02)  # bno.gyro (rad/s).
+BNO_REPORT_MAGNETOMETER = const(0x03)  # bno.magnetic (in µTesla).
+BNO_REPORT_LINEAR_ACCELERATION = const(0x04)  #  bno.linear_acceleration (m/^2, no gravity acceleration)
+BNO_REPORT_ROTATION_VECTOR = const(0x05)   #  bno.quaternion
+BNO_REPORT_GRAVITY = const(0x06)  #  bno.gravity
 BNO_REPORT_UNCALIBRATED_GYROSCOPE = const(0x07)
-BNO_REPORT_GAME_ROTATION_VECTOR = const(0x08)  # Game Rotation Vector
-BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR = const(0x09)
+BNO_REPORT_GAME_ROTATION_VECTOR = const(0x08)   # bno.game_quaternion
+BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR = const(0x09) #  bno.geomagnetic_quaternion
 BNO_REPORT_PRESSURE = const(0x0A)
 BNO_REPORT_AMBIENT_LIGHT = const(0x0B)
 BNO_REPORT_HUMIDITY = const(0x0C)
@@ -312,8 +312,8 @@ _SENSOR_REPORT_LAYOUT = {
     "v1": 4 | uctypes.INT16,
     "v2": 6 | uctypes.INT16,
     "v3": 8 | uctypes.INT16,  # valid valid for 3-tuple reports
-    "v4": 10 | uctypes.INT16,  # only valid for quaternion reports
-    "e1": 12 | uctypes.INT16,  # only valid for ARVR rotation report: quaternion + estimaate
+    "v4": 10 | uctypes.INT16,  # only valid for Game rotation vector quaternion reports
+    "e1": 12 | uctypes.INT16,  # only valid for rotation & ARVR rotation report: quaternion + estimate
 }
 
 _INITIAL_REPORTS = {
@@ -458,10 +458,7 @@ def _insert_command_request_report(
 
 
 class Packet:
-    """
-    A class representing a Hillcrest Laboratory Sensor Hub Transport packet
-    4-byte header
-    """
+    """ A class representing a Hillcrest Laboratory Sensor Hub Transport packet (all 4-byte headers) """
 
     def __init__(self, packet_bytes: bytearray) -> None:
         self.header = self.header_from_buffer(packet_bytes)
@@ -586,39 +583,39 @@ class SensorReading4:
             f"accuracy={self.accuracy}, timestamp_us={self.timestamp_us})"
         )
 
-# class SensorReading5:
-#     """5-element reading with optional metadata."""
-#     __slots__ = ("v1", "v2", "v3", "v4", "e1", "accuracy", "timestamp_us")
-#
-#     def __init__(self, v1, v2, v3, v4, e1, accuracy, timestamp_us):
-#         self.v1 = v1
-#         self.v2 = v2
-#         self.v3 = v3
-#         self.v4 = v4
-#         self.e1 = e1
-#         self.accuracy = accuracy
-#         self.timestamp_us = timestamp_us
-#
-#     def __iter__(self):
-#         yield self.v1
-#         yield self.v2
-#         yield self.v3
-#         yield self.v4
-#         yield self.e1
-#
-#     @property
-#     def meta(self):
-#         return self.accuracy, self.timestamp_us
-#
-#     @property
-#     def full(self):
-#         return self.v1, self.v2, self.v3, self.v4, self.e1, self.accuracy, self.timestamp_us
-#
-#     def __repr__(self):
-#         return (
-#             f"Sensor 5-tuple(v1={self.v1}, v2={self.v2}, v3={self.v3}, v4={self.v4}, e1={self.e1},"
-#             f"accuracy={self.accuracy}, timestamp_us={self.timestamp_us})"
-#         )
+class SensorReading5:
+    """5-element reading with optional metadata."""
+    __slots__ = ("v1", "v2", "v3", "v4", "e1", "accuracy", "timestamp_us")
+
+    def __init__(self, v1, v2, v3, v4, e1, accuracy, timestamp_us):
+        self.v1 = v1
+        self.v2 = v2
+        self.v3 = v3
+        self.v4 = v4
+        self.e1 = e1
+        self.accuracy = accuracy
+        self.timestamp_us = timestamp_us
+
+    def __iter__(self):
+        yield self.v1
+        yield self.v2
+        yield self.v3
+        yield self.v4
+        yield self.e1
+
+    @property
+    def meta(self):
+        return self.accuracy, self.timestamp_us
+
+    @property
+    def full(self):
+        return self.v1, self.v2, self.v3, self.v4, self.e1, self.accuracy, self.timestamp_us
+
+    def __repr__(self):
+        return (
+            f"Sensor 5-tuple(v1={self.v1}, v2={self.v2}, v3={self.v3}, v4={self.v4}, e1={self.e1},"
+            f"accuracy={self.accuracy}, timestamp_us={self.timestamp_us})"
+        )
 
 class BNO08X:
     """Library for the BNO08x IMUs from Hillcrest Laboratories
@@ -659,6 +656,7 @@ class BNO08X:
         self._tx_sequence_number: list[int] = [0, 0, 0, 0, 0, 0]
 
         self._two_ended_sequence_numbers: dict[int, int] = {}
+
         self._dcd_saved_at: float = -1
         self._me_calibration_started_at: float = -1.0
         self._calibration_complete = False
@@ -666,7 +664,7 @@ class BNO08X:
         self._wait_for_initialize = True
         self._data_available = False
         self._id_read = False
-        self._reset_mismatch = False
+        self._reset_mismatch = False  # if reset_pin set make sure hardware reset done, else pin bad
         self._quaternion_euler_vector = BNO_REPORT_GAME_ROTATION_VECTOR  # default can change with set_quaternion_euler
         # dictionary of most recent values from each enabled sensor report
         self._report_values = {}
@@ -706,7 +704,7 @@ class BNO08X:
                 if self._check_id() and not self._reset_mismatch:
                     self._dbg(f"*** {reset_type} reset successful, acknowledged with 0xF8 response")
                     sleep_ms(100)  # allow SHTP time to settle
-                    # Reset tx and rx sequence numbers, BNO08X initially sets sequence numbers to 0 after boot.
+                    # Reset tx and rx sequence numbers, after each reset
                     self._tx_sequence_number = [0, 0, 0, 0, 0, 0]
                     self._rx_sequence_number = [0, 0, 0, 0, 0, 0]
                     return
@@ -724,8 +722,7 @@ class BNO08X:
     # 3-Tuple Sensor Reports + accuracy + timestamp
     @property
     def linear_acceleration(self):
-        """A tuple representing the current linear acceleration values on the X, Y, and Z
-        axes in meters per second squared"""
+        """Current linear acceleration values on the X, Y, and Z axes in meters per second squared"""
         self._process_available_packets()
         try:
             self._unread_report_count[BNO_REPORT_LINEAR_ACCELERATION] = 0
@@ -746,8 +743,7 @@ class BNO08X:
 
     @property
     def gravity(self):
-        """A tuple representing the gravity vector in the X, Y, and Z components
-        axes in meters per second squared"""
+        """gravity vector in the X, Y, and Z components axes in meters per second squared"""
         self._process_available_packets()
         try:
             self._unread_report_count[BNO_REPORT_GRAVITY] = 0
@@ -758,8 +754,7 @@ class BNO08X:
 
     @property
     def gyro(self):
-        """A tuple representing Gyro's rotation measurements on the X, Y, and Z
-        axes in radians per second"""
+        """Gyro's rotation measurements on the X, Y, and Z axes in radians per second"""
         self._process_available_packets()
         try:
             self._unread_report_count[BNO_REPORT_GYROSCOPE] = 0
@@ -770,7 +765,7 @@ class BNO08X:
 
     @property
     def magnetic(self):
-        """A tuple of the current magnetic field measurements on the X, Y, and Z axes"""
+        """current magnetic field measurements on the X, Y, and Z axes"""
         self._process_available_packets()
         try:
             self._unread_report_count[BNO_REPORT_MAGNETOMETER] = 0
@@ -781,7 +776,7 @@ class BNO08X:
 
     @property
     def raw_acceleration(self):
-        """Returns the sensor's raw, unscaled value from the accelerometer registers"""
+        """raw acceleration unscaled/uncalibrated from raw registers"""
         self._process_available_packets()
         try:
             self._unread_report_count[BNO_REPORT_RAW_ACCELEROMETER] = 0
@@ -792,7 +787,7 @@ class BNO08X:
 
     @property
     def raw_gyro(self):
-        """Returns the sensor's raw, unscaled value from the gyro registers"""
+        """raw gyroscope unscaled/uncalibrated from raw registers"""
         self._process_available_packets()
         try:
             self._unread_report_count[BNO_REPORT_RAW_GYROSCOPE] = 0
@@ -803,7 +798,7 @@ class BNO08X:
 
     @property
     def raw_magnetic(self):
-        """Returns the sensor's raw, unscaled value from the magnetometer registers"""
+        """raw magnetic unscaled/uncalibrated from raw registers"""
         self._process_available_packets()
         try:
             self._unread_report_count[BNO_REPORT_RAW_MAGNETOMETER] = 0
@@ -891,9 +886,8 @@ class BNO08X:
     @property
     def shake(self):
         """True if a shake was detected on any axis since the last time it was checked
-        This property has a "latching" behavior where once a shake is detected, it will stay in a
-        "shaken" state until the value is read. This prevents missing shake events but means that
-        this property is not guaranteed to reflect the shake state at the moment it is read
+        State is "latched" once a shake is detected, it stays in "shaken" state until the value is read.
+        This prevents missing shake events, but it not guaranteed to reflect current shake state.
         """
         self._process_available_packets()
         try:
@@ -1222,14 +1216,13 @@ class BNO08X:
             sw_part_number = unpack_from("<I", report_bytes, 4)[0]
             sw_build_number = unpack_from("<I", report_bytes, 8)[0]
             sw_patch = unpack_from("<H", report_bytes, 12)[0]
-
             self._dbg("Product ID Response (0xf8):")
             self._dbg(f"*** Last reset cause: {reset_cause} = {_RESET_CAUSE_STRING[reset_cause]}")
             self._dbg(f"*** Part Number: {sw_part_number}")
             self._dbg(f"*** Software Version: {sw_major}.{sw_minor}.{sw_patch}")
             self._dbg(f"\tBuild: {sw_build_number}\n")
             
-            # After the first Product ID Response the reports will be 0 and need to be ignored
+            # only first Product ID Response has reset cause, if reset_pin make sure hardware performed
             if reset_cause != 0:
                 if self._reset_pin is not None:
                     if reset_cause != 4:  # 4 = expected hardware-reset via reset pin
@@ -1287,7 +1280,7 @@ class BNO08X:
             self._unread_report_count[report_id] += 1
             return
 
-        # Handle all control reports
+        #  **** Handle all control reports  ****
         if report_id >= 0xF0:
             self._handle_control_report(report_id, report_bytes)
             return
@@ -1349,13 +1342,12 @@ class BNO08X:
             self._report_values[report_id] = sensor_data
             return
 
-        # General Case all other sensors
-        # FUTURE: TODO fix ARVR 5-tuple for ARVR-Stabilized Rotations (0x280
-        sensor_data, accuracy, delay_us = _parse_sensor_report_data(report_bytes)
-        self._dbg(f"Report: {_REPORTS_DICTIONARY[report_id]}\nData: {sensor_data}, {accuracy=}, {delay_us=}")
-        self._sensor_timestamp = self.last_interrupt_us - self._last_base_timestamp_us + delay_us
-        self._report_values[report_id] = sensor_data
-        return
+        if 0x28 <= report_id <= 0x29:
+            # FUTURE: add two ARVR reports (4-tuple and 5-Tuple)
+            raise NotImplementedError(f"ARVR Reports ({report_id}) is not supported yet.")
+
+        raise NotImplementedError(f"Report Type ({report_id}) is not supported.")
+
 
     # Enable a given feature of the BNO08x (See Hillcrest 6.5.4)
     def enable_feature(self, feature_id, freq=None):
@@ -1409,14 +1401,17 @@ class BNO08X:
             raise RuntimeError(f"BNO08X: enable_feature: not able to enable feature: {feature_id}")
 
 
-
     def report_period_us(self, feature_id):
         """
-        return
+        return: report period in us (microseconds, not ms milliseconds)
         """
         return self._report_periods_dictionary_us[feature_id]
 
     def print_report_period(self):
+        """
+        Print out
+        :return:
+        """
         print(f"Enabled Report Periods:")
         for feature_id in self._report_periods_dictionary_us.keys():
             period_ms = self.report_period_us(feature_id) / 1000.0

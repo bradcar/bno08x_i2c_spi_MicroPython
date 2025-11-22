@@ -1,5 +1,5 @@
 # bno08x-i2c-spi-micropython
-## Micropython I2C SPi library for 9-axis BNO08X sensors
+## Micropython I2C SPI library BNO08X sensors for 9-axis fusion
 
 - 100% inspired by the original Adafruit CircuitPython I2C library for BNO08X
 - Copyright (c) 2020 Bryan Siepert for Adafruit Industries
@@ -68,15 +68,19 @@ Primary sensor reports:
         BNO_REPORT_STABILITY_CLASSIFIER
         BNO_REPORT_ACTIVITY_CLASSIFIER
 
+BNO Sensor documentation uses the words "ROTATION_VECTOR", and we honor that in several constants. Most people refer
+to these as quaternions, which makes coding easier, so in this code we use bno.quaternion and enable it with
+"BNO_REPORT_ROTATION_VECTOR" and likewise use bno.game_quaternion and enable it with "BNO_REPORT_GAME_ROTATION_VECTOR".
+
 ## Getting the sensor results:
 
 Sensors values can be accessed with:
 
     accel_x, accel_y, accel_z = bno.acceleration
 
-Roll, tilt, and yaw can be obtained with:
+Roll, tilt, and yaw can be obtained easily from quaternion with:
 
-    roll, tilt, yaw = bno.euler
+    roll, tilt, yaw = bno.quaternion.euler
 
 The data and the metadata for each report can be accessed at the same time using ".full".
 In this way, the accuracy and the usec-accurate timestamp  of a particular report is returned at the same time.
@@ -84,6 +88,7 @@ The timestamp_us is synchronized with the host's usec time. Understanding timest
 high-frequency applications (>5Hz).
 
     accel_x, accel_y, accel_z, accuracy, timestamp_us = bno.acceleration.full
+    roll, tilt, yaw, accuracy, timestamp_us = bno.quaternion.euler_full   # note underscore
 
 Metadata on the accuracy and the usec-accurate timestamp can also be separately accessed. However, unless carefully
 designed in the user code, they may be from a different report.
@@ -98,11 +103,14 @@ The examples directory shows the use of the following sensor reports. Each of th
     x, y, z = bno.linear_acceleration   # linear accel 3-tuple of x,y,z float returned
     x, y, z = bno.gyro                  # gryoscope 3-tuple of x,y,z float returned
     x, y, z = bno.magnetic              # magnetic 3-tuple of x,y,z float returned
-    roll, pitch, yaw = bno.euler        # rotation angle in Euler orientation 3-tuple of x,y,z float returned
     x, y, z = bno.gravity               # gravity vector 3-tuple of x,y,z float returned
-    i, j, k, real = bno.quaternion      # rotation 4-tuple of i,j,k,real float returned
+    roll, pitch, yaw = bno.quaternion.euler     # rotation degree angle in Euler orientation 3-tuple of x,y,z float returned
+
+
+    i, j, k, real = bno.quaternion              # rotation 4-tuple of i,j,k,real float returned
     i, j, k, real = bno.geomagnetic_quaternion  # rotation 4-tuple of i,j,k,real float returned
     i, j, k, real = bno.game_quaternion         # rotation 4-tuple of i,j,k,real float returned
+
     num = bno.steps                     # number of steps since sensor initialization returned
     state = bno.shake                   # boolean of state since last read returned
     stability_str = bno.stability_classification    # string of stability classification returned
