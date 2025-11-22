@@ -27,25 +27,25 @@ as every 4ms to 10ms (depending on the report requested).
 
     # set up the  I2C bus
     int_pin = Pin(14, Pin.IN, Pin.PULL_UP)
-    i2c0 = I2C(0, scl=Pin(13), sda=Pin(12), freq=100_000, timeout=200_000)
+    i2c0 = I2C(0, scl=Pin(13), sda=Pin(12), freq=400_000)
 
     # set up the BNO sensor on I2C
     bno = BNO08X_I2C(i2c0, address=0x4b, int_pin=int_pin)
 
 Required for I2C (see SPI and UART below):
-- address : each BNO08x needs a separate address (depending on board, add solder jump or cut wire).
-- int_pin : required for accurate sensor timestamps. Define a Pin object, not  number.
+- address : each BNO08x needs a separate address (0x4b or 0x4a, depending on solder bump).
+- int_pin : required for operation and also gives accurate sensor timestamps. Define a Pin object, not  number.
 
 Optional parameters:
 
     bno = BNO08X_I2C(i2c0, address=0x4b, reset_pin=Pin(12), int_pin=Pin(13), debug=False)
 
 Optional for I2C:
-- reset_pin : used by I2C for hardware reset, if not defined uses soft reset. It is a Pin object, not number
+- reset_pin : will allow ability to do hardware reset, if not defined uses soft reset. It is a Pin object, not number
 - debug : print very detailed logs, mainly for debugging driver.
 
-PS0 (Wake_pin) and PS1 are used to select I2C, therefore I2C can not use wake pin.
-In order to use I2C, PS1 can not have solder blob so it is tied to ground and PS0 (Wake_pin) can not have solder blob so it is tied to ground.
+Maximum for i2c is 400_000 (400kbs). PS0 (Wake_pin) and PS1 are used to select I2C, therefore I2C can not use wake pin.
+To use I2C, both PS0 and PS1 can not have solder blobs which means both are tied to ground.
 
 ## Enable the sensor reports
 
@@ -94,12 +94,12 @@ designed in the user code, they may be from a different report.
 
 The examples directory shows the use of the following sensor reports. Each of these functions use on-chip sensor fusion for accuracy.
 
-    x, y, z = bno.acceleration          # acceleration 3-tuple of x,y,z float returned
+    x, y, z = bno.acceleration          # acceleration 3-tuple of x,y,z float returned (gravity direction included)
     x, y, z = bno.linear_acceleration   # linear accel 3-tuple of x,y,z float returned
-    x, y, z = bno.gyro                  # acceleration 3-tuple of x,y,z float returned
-    x, y, z = bno.magnetic              # acceleration 3-tuple of x,y,z float returned
-    roll, pitch, yaw = bno.euler        # rotation 3-tuple of x,y,z float returned
-    x, y, z = bno.gravity               # vector 3-tuple of x,y,z float returned
+    x, y, z = bno.gyro                  # gryoscope 3-tuple of x,y,z float returned
+    x, y, z = bno.magnetic              # magnetic 3-tuple of x,y,z float returned
+    roll, pitch, yaw = bno.euler        # rotation angle in Euler orientation 3-tuple of x,y,z float returned
+    x, y, z = bno.gravity               # gravity vector 3-tuple of x,y,z float returned
     i, j, k, real = bno.quaternion      # rotation 4-tuple of i,j,k,real float returned
     i, j, k, real = bno.geomagnetic_quaternion  # rotation 4-tuple of i,j,k,real float returned
     i, j, k, real = bno.game_quaternion         # rotation 4-tuple of i,j,k,real float returned
@@ -108,7 +108,7 @@ The examples directory shows the use of the following sensor reports. Each of th
     stability_str = bno.stability_classification    # string of stability classification returned
     activity_str = bno.activity_classification      # string of activity classification returned
 
-The following functions can be used to tare, calibrate, and test the sensor:
+The following functions can be used to tare and calibrate the sensor:
 
     bno.tare  # tare the sensor
 
@@ -116,8 +116,6 @@ The following functions can be used to tare, calibrate, and test the sensor:
     mag_accuracy = bno.calibration_status  # magnetic calibration status int returned
     print(f"Mag Calibration: {REPORT_ACCURACY_STATUS[mag_accuracy]} = {mag_accuracy}")
     bno.save_calibration_data  # Save calibration
-
-    status = bno.ready  # test sensor status, boolean returned
 
 ## Option to Change Sensor Report Frequency
 
@@ -151,7 +149,7 @@ Unfortunately, the BNO080, BNO085, and BNO086 all use **_non-standard clock stre
 Requirements to using Sparkfun BNO086 with SPI
 1. One must clear i2c jumper when using SPI or UART (https://docs.sparkfun.com/SparkFun_VR_IMU_Breakout_BNO086_QWIIC/assets/board_files/SparkFun_VR_IMU_Breakout_BNO086_QWIIC_Schematic_v10.pdf)
 2. One must have solder blob ONLY on SP1, must have Wake pin connect to a pin.
-3. UART must be set to baudrate=3000000
+3. UART must be set to baudrate=3_000_000
 
 In order to use SPI on most sensor boards instead of I2C you must often have to add ONE solder blob on PS1. 
 On the back side of Sparkfun BNO086 and Adafruit BNO085, one needs a solder blob to bridge PS1 which will set PS1 high for SPI operation. 
