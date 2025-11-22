@@ -54,15 +54,16 @@ class BNO08X_UART(BNO08X):
         _interface = "UART"
         
         if int_pin is None:
-            raise RuntimeError("int_pin is required for SPI operation")
+            raise RuntimeError("int_pin is required for UART operation")
         if not isinstance(int_pin, Pin):
-            raise TypeError("int_pin must be a Pin object, not Pin number")
+            raise TypeError("int_pin must be a Pin object, not {type(int_pin)}")
         self._int = int_pin
-        
+
         if reset_pin is not None and not isinstance(reset_pin, Pin):
-            raise TypeError(f"Reset (RST) pin must be a 'machine.Pin' object or None, not {type(rst_pin)}.")
+            raise TypeError(f"reset_pin (RST) must be a Pin object or None, not {type(reset_pin)}")
         self._reset = reset_pin
 
+        # wake_pin must be NONE!  wake_pin/PS0 = 0 (gnd)
         super().__init__(_interface, reset_pin=reset_pin, int_pin=int_pin, cs_pin=None, wake_pin=None, debug=debug)
 
     def _send_packet(self, channel, data):
@@ -217,7 +218,7 @@ class BNO08X_UART(BNO08X):
 
                 packet = self._read_packet()
                 self._handle_packet(packet)
-                self._dbg(f"Initial packet, Channel {packet.channel_number} (Seq {packet.sequence_number}).")
+                self._dbg(f"Initial packet, Channel {packet.channel_number} (Seq {packet.header.sequence_number}).")
 
             except (RuntimeError, PacketError):
                 # expected end-of-burst condition (timeout, no more data)
@@ -272,7 +273,7 @@ class BNO08X_UART(BNO08X):
 
                 packet = self._read_packet()
                 self._handle_packet(packet)
-                self._dbg(f"Initial packet, Channel {packet.channel_number} (Seq {packet.sequence_number}).")
+                self._dbg(f"Initial packet, Channel {packet.channel_number} (Seq {packet.header.sequence_number}).")
 
             except (RuntimeError, PacketError):
                 # expected end-of-burst condition (timeout, no more data)
