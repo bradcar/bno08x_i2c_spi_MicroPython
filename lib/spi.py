@@ -221,7 +221,7 @@ class BNO08X_SPI(BNO08X):
         mv[4:4+data_length] = data
 
         self._cs.value(0)
-        sleep_us.value(1)
+        sleep_us(1)
         self._spi.write(mv[:write_length])  # also zero-copy
         self._cs.value(1)
 
