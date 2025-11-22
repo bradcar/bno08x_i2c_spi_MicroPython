@@ -51,6 +51,7 @@ class BNO08X_UART(BNO08X):
 
     def __init__(self, uart, reset_pin=None, int_pin=None, debug=False):
         self._uart = uart
+        self._debug = debug
         _interface = "UART"
         
         if int_pin is None:
@@ -96,10 +97,7 @@ class BNO08X_UART(BNO08X):
         self._tx_sequence_number[channel] = (self._tx_sequence_number[channel] + 1) % 256
         return self._tx_sequence_number[channel]
 
-    def _read_into(self, buf, start=0, end=None):
-        if end is None:
-            end = len(buf)
-
+    def _read_into(self, buf, start, end):
         for idx in range(start, end):
             data = self._uart.read(1)
             b = data[0]
@@ -131,7 +129,56 @@ class BNO08X_UART(BNO08X):
         if not data or data[0] != 0x01:
             raise RuntimeError("Unhandled UART control SHTP protocol")
 
-        self._read_into(self._data_buffer, end=4)
+        self._read_into(self._data_buffer, start=0, end=4)
+# -----
+#     def _read_header(self):
+#         """
+#         Reads the first 4 bytes available as a header.
+#         Waits for the H_INTN interrupt flag before proceeding.
+#         """
+#         start_time = ticks_ms()
+#         TIMEOUT_SEC = 5.0
+#         
+#         print(f"{self._data_available=}, {self._uart.any()=}")
+# 
+#         while not self._data_available:
+#             if _elapsed_sec(start_time) > TIMEOUT_SEC:
+#                 print("ERROR 5 sec timeout, Check UART pins & sensor wiring (host TX to SCLK, host RX to SDA)")
+#                 raise RuntimeError("int_pin read timeout while waiting for BNO08X data.")
+#             sleep_ms(1) # Yield control briefly to avoid busy-waiting
+# 
+#         self._data_available = False 
+# 
+#         start_time_read = ticks_ms()
+#         while True:
+#             data = self._uart.read(1)
+#             if not data:
+#                 if _elapsed_sec(start_time_read) > 0.1: # Short, aggressive read timeout
+#                     raise RuntimeError("Timeout waiting for 0x7E start byte after interrupt.")
+#                 continue
+#                 
+#             b = data[0]
+#             if b == 0x7E:
+#                 break
+# 
+#         # 3. Read the SHTP Protocol ID (0x01)
+#         data = self._uart.read(1)
+#         print(f" SHTP protocol {data=}")
+#         if data and data[0] == 0x7E:  # Handles the case where the start byte was skipped/missed
+#             data = self._uart.read(1) # Read the actual Protocol ID
+#             
+#         if not data or data[0] != 0x01:
+#             raise RuntimeError("Unhandled UART control SHTP protocol ID.")
+# 
+#         start_time_read = ticks_ms()
+#         while self._uart.any() < 4:
+#             if _elapsed_sec(start_time_read) > 0.1:
+#                 raise RuntimeError("Timeout waiting for 4-byte SHTP header data.")
+#             sleep_us(100) # Yield briefly
+#        
+#         self._read_into(self._data_buffer, start=0, end=4)
+#         print(f"{self._data_buffer[:4]=}")
+        
 
     def _read_packet(self, wait=None):
         self._read_header()
@@ -167,8 +214,14 @@ class BNO08X_UART(BNO08X):
 
     @property
     def _data_ready(self):
-        self._dbg(f"_data_ready: {self._uart.any()}")
-        return self._uart.any() >= 4
+        """
+        UART variant also has uart.any() fallback
+        """
+        if self._data_available:
+            return True
+        
+#         self._dbg(f"_data_ready: {self._uart.any()}")
+#         return self._uart.any() >= 4
 
     def _soft_reset(self):
         """
