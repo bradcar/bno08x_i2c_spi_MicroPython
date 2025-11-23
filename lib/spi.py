@@ -91,9 +91,9 @@ class BNO08X_SPI(BNO08X):
         if self._wake_pin is not None:
             self._dbg("WAKE Pulse for BNO08x (spi.py)")
             self._wake_pin.value(0)
-            sleep_ms(2)  # lower than 1ms doesn't seem to work
+            sleep_us(500)  # 500us seems reliable
             self._wake_pin.value(1)
-            sleep_ms(10)  # 1 ms works, 1 ms sometimes fails
+            sleep_ms(1)  # 1 ms works
 
     def _wait_for_int(self):
         """
@@ -125,7 +125,7 @@ class BNO08X_SPI(BNO08X):
             if self._debug and ticks_ms() % 500 < 5:  # Log every ~0.5 seconds
                 self._dbg(f"INT value still high (1) at T={_elapsed_sec(start_time):.3f}s")
 
-            sleep_us(100)  # TODO How long?
+            sleep_us(1)  # TODO How long?
 
         self._dbg(f"Timeout (3.0s) reached. INT pin state: {self._int.value()}")
         raise RuntimeError("Timeout waiting for INT to go low")
@@ -188,7 +188,7 @@ class BNO08X_SPI(BNO08X):
         if packet_bytes == 0:
             raise PacketError("No packet available")
 
-        self._dbg(r"channel {channel} has {packet_bytes - 4} bytes available")
+        # self._dbg(f"channel {channel} has {packet_bytes - 4} bytes available")
 
         if packet_bytes > DATA_BUFFER_SIZE:
             # If the packet is too big, reallocate the buffer. This is normal.

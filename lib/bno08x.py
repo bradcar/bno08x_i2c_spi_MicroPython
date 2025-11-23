@@ -1085,7 +1085,8 @@ class BNO08X:
 
         flag = processed_count > 0
         self._dbg(f"_process_available_packets done, {processed_count} packets processed - {flag}")
-        print(f"proc_avail_packets: {self._unread_report_count}")
+        # TODO add print if helpful in debug
+        # print(f"proc_avail_packets: {self._unread_report_count}")
         return flag
 
 
@@ -1282,8 +1283,8 @@ class BNO08X:
             self._dbg(f"Report: {_REPORTS_DICTIONARY[report_id]}\nData: {sensor_data}, {accuracy=}, {delay_us=}")
 
             self._sensor_us = self.last_interrupt_us - self._last_base_timestamp_us + delay_us
-            print(
-                f"sensor irq= {(self.last_interrupt_us - self.prev_interrupt_us) / 1000.0} ms")
+            # tpical irq is 1.4 ms to 1.67 ms with print
+            # print(f"sensor irq= {(self.last_interrupt_us - self.prev_interrupt_us) / 1000.0} ms")
 
             if report_id == BNO_REPORT_MAGNETOMETER:
                 self._magnetometer_accuracy = accuracy
