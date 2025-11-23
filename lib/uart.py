@@ -57,7 +57,7 @@ class BNO08X_UART(BNO08X):
         if int_pin is None:
             raise RuntimeError("int_pin is required for UART operation")
         if not isinstance(int_pin, Pin):
-            raise TypeError("int_pin must be a Pin object, not {type(int_pin)}")
+            raise TypeError(f"int_pin must be a Pin object, not {type(int_pin)}")
         self._int = int_pin
 
         if reset_pin is not None and not isinstance(reset_pin, Pin):

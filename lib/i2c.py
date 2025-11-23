@@ -43,11 +43,11 @@ class BNO08X_I2C(BNO08X):
         if int_pin is None:
             raise RuntimeError("int_pin is required for I2C operation")
         if not isinstance(int_pin, Pin):
-            raise TypeError("int_pin must be a Pin object, not Pin number")
+            raise TypeError(f"int_pin must be a Pin object, not {type(int_pin)}.")
         self._int = int_pin
 
         if reset_pin is not None and not isinstance(reset_pin, Pin):
-            raise TypeError(f"Reset (RST) pin must be a 'machine.Pin' object or None, not {type(rst_pin)}.")
+            raise TypeError(f"Reset (RST) pin must be a Pin object or None, not {type(reset_pin)}")
         self._reset = reset_pin
 
         # give the parent constructor (BNO08X.__init__), the right values from BNO08X_I2C
