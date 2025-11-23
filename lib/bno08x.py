@@ -36,14 +36,17 @@ Delay
    the delay field may be populated, then delay and the timebase reference
    are used to calculate the sensor sample's actual timestamp.
 
-TODO: BRC updating sensor values more efficiently - spi @ 3.1  ms 322Hz
+TODO: BRC updating sensor values more efficiently: spi @ 3.1ms (322Hz), i2c at 15.6ms (64Hz) uart at ?.?ms (?Hz).
+
+TODO: Apply spi optimizations to i2c
 
 TODO: I2C/UART _process_available_packets: if ticks_diff(ticks_ms(), start_time) > 1
-TODO: BRC fix UART mis-framing (with quaternions?)
-TODO: BRC test UART with Reset & Interrupt pins
 
-TODO: BRC retest CALIBRATION
-TODO: BRC add TARE
+TODO: apply spi optimizations to uart fix UART mis-framing (with quaternions?)
+TODO: test UART with Reset & Interrupt pins
+
+TODO: retest CALIBRATION, expand beyond mag accuracy... also fix that it was only mag
+TODO: add TARE
 """
 
 __version__ = "0.1"
@@ -375,52 +378,6 @@ def _elapsed_sec(start_time):
     return ticks_diff(ticks_ms(), start_time) / 1000.0
 
 
-############ REPORT PARSING ###########################
-def _parse_sensor_report_data(report_bytes: bytearray) -> tuple[tuple, int, int]:
-    """
-    uctypes-based parser for BNO08x sensor reports, sensor data starts at offset=4
-    Parses 3-tuple vectors, 4-tuple quaternions, and 5-tuple ARVR rotation.
-    """
-    s = uctypes.struct(uctypes.addressof(report_bytes), _SENSOR_REPORT_LAYOUT, uctypes.LITTLE_ENDIAN)
-    report_id = s.report_id
-    scalar, count, _ = _AVAIL_SENSOR_REPORTS[report_id]
-
-    # Extract accuracy from byte2 low bits
-    accuracy = s.byte2 & 0x03
-
-    # Extract delay (14 bits)
-    delay_upper = (s.byte2 >> 2) & 0x3F
-    delay_raw = (delay_upper << 8) | s.byte3
-    delay_us = delay_raw * 100
-
-    # Read & scale sensor fields using uctypes INT16 fields
-    if count == 3:
-        scaled_data = (
-            s.v1 * scalar,
-            s.v2 * scalar,
-            s.v3 * scalar,
-        )
-    elif count == 4:
-        scaled_data = (
-            s.v1 * scalar,
-            s.v2 * scalar,
-            s.v3 * scalar,
-            s.v4 * scalar,
-        )
-    elif count == 5:
-        scaled_data = (
-            s.v1 * scalar,
-            s.v2 * scalar,
-            s.v3 * scalar,
-            s.v4 * scalar,
-            s.e1,
-        )
-    else:
-        raise ValueError(f"Unexpected tuple length {count}")
-
-    return scaled_data, accuracy, delay_us
-
-
 ############ COMMAND PARSING ###########################
 def _parse_command_response(report_bytes: bytearray):
     # CMD response report:
@@ -429,7 +386,6 @@ def _parse_command_response(report_bytes: bytearray):
     report_body = unpack_from("<BBBBB", report_bytes)
     response_values = unpack_from("<BBBBBBBBBBB", report_bytes, 5)
     return report_body, response_values
-
 
 def _insert_command_request_report(
         command: int,
@@ -934,7 +890,7 @@ class BNO08X:
         :return: roll, pitch, yaw component values in degrees
         """
         jsqr = j * j
-        t0 = 2.0 * (r * i + j * r)
+        t0 = 2.0 * (r * i + j * k)
         t1 = 1.0 - 2.0 * (i * i + jsqr)
         roll = degrees(atan2(t0, t1))
 
@@ -1322,9 +1278,6 @@ class BNO08X:
             self._sensor_us = self.last_interrupt_us - self._last_base_timestamp_us + delay_us
             # tpical irq is 1.4 ms to 1.67 ms with print
             # print(f"sensor irq= {(self.last_interrupt_us - self.prev_interrupt_us) / 1000.0} ms")
-
-            if report_id == BNO_REPORT_MAGNETOMETER:
-                self._magnetometer_accuracy = accuracy
 
             self._report_values[report_id] = sensor_data + (accuracy, self._sensor_us)
             self._unread_report_count[report_id] += 1

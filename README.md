@@ -12,10 +12,12 @@ bno08x MicroPython driver for I2C, SPI, UART on MicroPython
 This library has been tested with BNO086 sensor. It should work with BNO080 and BNO085 sensors. 
 It has been tested with Raspberry Pico 2 W.
 
-This driver is written to provide a simple interface and results for slow updates. It also provides 0.1 msec resolution 
-timestamps for each sensor report, because knowing IMU results together with timestamp of results is critical for many
-telemetry applications.  This driver is written to be efficient because these sensors can update results as frequently
-as every 4ms to 10ms (depending on the report requested).
+This driver is written to provide to respond to high-frequency reports (short period), and also provides 0.1 msec resolution 
+timestamps for each sensor report. Knowing IMU results together with timestamp of results is critical for many
+telemetry applications.  This driver requires that the int_pin be connect to the sensors to work and also provide accurate timestamps.
+The reset_pin is highly encouraged as you may have to do several soft resets to get sensor to respond.
+The report frequency will be limited by the interface chosen with SPI being about 5x faster than I2c.
+SPI is also ?x faster than UART. Chose the report rate and interface that meets your needs.
 
 ## Setting up to use the Sensor
 
@@ -41,15 +43,15 @@ Optional parameters:
     bno = BNO08X_I2C(i2c0, address=0x4b, reset_pin=Pin(12), int_pin=Pin(13), debug=False)
 
 Optional for I2C:
-- reset_pin : will allow ability to do hardware reset, if not defined uses soft reset. It is a Pin object, not number
+- reset_pin : recommended for reliable hardware reset, if not defined it uses soft reset. It is a Pin object, not number
 - debug : print very detailed logs, primarily for driver debug & development.
 
-Maximum for i2c is 400_000 (400kbs). PS0 (Wake_pin) and PS1 are used to select I2C, therefore I2C can not use wake pin.
+The maximum clock frequency for i2c is 400_000 (~400kbs). PS0 (Wake_pin) and PS1 are used to select I2C, therefore I2C can not use wake pin.
 To use I2C, both PS0 and PS1 can not have solder blobs which means both are tied to ground.
 
 ## Enable the sensor reports
 
-Before getting sensor results the reports must be enabled:
+Before getting sensor results, the reports must be enabled:
 
     bno.enable_feature(BNO_REPORT_ACCELEROMETER)  # for accelerometer
     
@@ -128,8 +130,10 @@ The following functions can be used to tare and calibrate the sensor:
     bno.tare  # tare the sensor
 
     bno.begin_calibration  # begin calibration
+    x, y, z, mag_acc, ts = bno.magnetic.full
+    print(f"Magnetic Accuracy: {REPORT_ACCURACY_STATUS[mag_acc]} = {mag_acc}")
+TODO FIX THIS **********************
     mag_accuracy = bno.calibration_status  # magnetic calibration status int returned
-    print(f"Mag Calibration: {REPORT_ACCURACY_STATUS[mag_accuracy]} = {mag_accuracy}")
     bno.save_calibration_data  # Save calibration
 
 ## Option to Change Sensor Report Frequency
