@@ -13,9 +13,9 @@ from struct import pack_into
 import uctypes
 from machine import Pin
 from micropython import const
+from utime import ticks_ms, ticks_diff, sleep_us
 
 from bno08x import BNO08X, Packet, PacketError
-from lib.bno08x import DATA_BUFFER_SIZE
 
 _BNO08X_DEFAULT_ADDRESS = const(0x4B)
 _BNO08X_BACKUP_ADDRESS = const(0x4A)
@@ -59,6 +59,7 @@ class BNO08X_I2C(BNO08X):
         if not isinstance(int_pin, Pin):
             raise TypeError(f"int_pin must be a Pin object, not {type(int_pin)}.")
         self._int = int_pin
+        self._int.init(Pin.IN, Pin.PULL_UP)  # guarantee int_pin is properly set up
 
         if reset_pin is not None and not isinstance(reset_pin, Pin):
             raise TypeError(f"Reset (RST) pin must be a Pin object or None, not {type(reset_pin)}")
@@ -66,6 +67,23 @@ class BNO08X_I2C(BNO08X):
 
         # give the parent constructor (BNO08X.__init__), the right values from BNO08X_I2C
         super().__init__(_interface, reset_pin=reset_pin, int_pin=int_pin, cs_pin=None, wake_pin=None, debug=debug)
+
+    def _wait_for_int(self):
+        """
+        Waits for the BNO08x H_INTN pin to assert (go low) using the IRQ flag.
+        """
+        start_time = ticks_ms()
+
+        if self._int.value() == 0 and self._data_ready:
+            self._dbg("_wait_for_int: INT is active low (0) on entry and _data_ready")
+            return
+
+        while ticks_diff(ticks_ms(), start_time) < 3000:  # 3.0sec
+            if self._data_ready:
+                return
+            sleep_us(1000)
+
+        raise RuntimeError("Timeout (3.0s) waiting for INT flag to be set")
 
     def _send_packet(self, channel, data):
         seq = self._tx_sequence_number[channel]
@@ -87,34 +105,50 @@ class BNO08X_I2C(BNO08X):
         return self._tx_sequence_number[channel]
 
     def _read_packet(self, wait=None):
-        self._i2c.readfrom_into(self._bno_i2c_addr, self._data_buffer_memoryview[:4])
+        if wait:
+            self._wait_for_int()
 
-        header = Packet.header_from_buffer(self._data_buffer)
-        packet_bytes = header.packet_byte_count
-        channel = header.channel_number
-        sequence = header.sequence_number
+        header_read_attempt = 0
+        while header_read_attempt < 2:
+            header_read_attempt += 1
+            header_mv = memoryview(self._data_buffer)[:4]
+            try:
+                self._i2c.readfrom_into(self._bno_i2c_addr, header_mv)
+            except OSError:
+                return None  # Handle rate I2C read failure
 
-        self._rx_sequence_number[channel] = sequence
+            header_view = uctypes.struct(uctypes.addressof(self._data_buffer), _HEADER_STRUCT, uctypes.LITTLE_ENDIAN)
+            packet_bytes = header_view.packet_bytes
+
+            if packet_bytes > len(self._data_buffer):
+                self._data_buffer = bytearray(packet_bytes)
+                continue
+            break
+
         if packet_bytes == 0:
-            raise PacketError("No packet available")
+            return None
+        if packet_bytes < 4:
+            raise PacketError(f"Invalid packet length: {packet_bytes}")
 
-        packet_bytes -= 4
+        channel = header_view.channel
+        sequence = header_view.sequence
+        self._rx_sequence_number[channel] = sequence
 
-        # self._dbg commented out in time critical code
-        # self._dbg(f"{channel=} has {packet_bytes} bytes available to read")
+        mv = memoryview(self._data_buffer)[:packet_bytes]
+        self._i2c.readfrom_into(self._bno_i2c_addr, mv)
 
-        total_read_length = packet_bytes + 4
-
-        if total_read_length > DATA_BUFFER_SIZE:
-            self._data_buffer = bytearray(total_read_length)
-            # self._dbg commented out in time critical code
-            # self._dbg(f"*** ALLOCATION: increased _data_buffer to bytearray({total_read_length})")
-
-        self._i2c.readfrom_into(self._bno_i2c_addr, self._data_buffer_memoryview[:total_read_length])
-
-        new_packet = Packet(self._data_buffer)
+        new_packet = Packet(self._data_buffer[:packet_bytes])
         self._update_sequence_number(new_packet)
         # self._dbg commented out in time critical code
         # self._dbg(f"New Packet: {new_packet}")
-
         return new_packet
+
+    # I2C _data_ready logic. resets _data_available flag for next int event
+    @property
+    def _data_ready(self):
+        if self._int.value() == 0:
+            self._data_available = True
+
+        ready = self._data_available
+        self._data_available = False
+        return ready
