@@ -5,7 +5,7 @@
 # SPDX-License-Identifier: MIT
 #
 """
-Subclass of `BNO08X` to use SPI
+SPI Class that requires BNO08X base Class
 
 BNO08x sensor use the non-defaul SPI. This driver reconfigures SPI to those settings.
 BNO08X Datasheet (1.2.4.2 SPI) requires CPOL = 1 and CPHA = 1, which is: polarity=1 and phase=1
@@ -32,6 +32,7 @@ from utime import ticks_ms, ticks_diff, sleep_ms, sleep_us
 
 from bno08x import BNO08X, Packet, PacketError, DATA_BUFFER_SIZE
 
+
 _HEADER_STRUCT = {
     "packet_bytes": (uctypes.UINT16 | 0),
     "channel": (uctypes.UINT8 | 2),
@@ -48,7 +49,7 @@ class BNO08X_SPI(BNO08X):
         reset_pin: optionl reset to BNO08x
         int_pin=None: optional int_pin to get signal when BNO08x is ready
         baudrate: (default 1 MHz, max 3 MHz)
-        debug: Enables optional logging prints used for debugging driver
+        debug: prints very detailed logs, primarily for driver debug & development.
     """
 
     def __init__(self, spi_bus, cs_pin, reset_pin=None, int_pin=None, wake_pin=None, baudrate=1_000_000, debug=False):
@@ -78,6 +79,7 @@ class BNO08X_SPI(BNO08X):
         if not isinstance(int_pin, Pin):
             raise TypeError("int_pin must be a Pin object, not {type(int_pin)}")
         self._int = int_pin
+        self._int.init(Pin.IN, Pin.PULL_UP) # guarantee int_pin is properly set up
 
         if reset_pin is not None and not isinstance(reset_pin, Pin):
             raise TypeError(f"reset_pin (RST) must be a Pin object or None, not {type(reset_pin)}")
