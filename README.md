@@ -103,7 +103,7 @@ Using .full is recommended.
     accuracy, timestamp_us = bno.acceleration.meta
 
 If you are using quaternions for various processing and at a later time you want to convert to an euler angle (degrees),
-you can use the following conversion function:
+you can use the following conversion function which uses the common aerospace / robotics convention (XYZ rotation order (roll-pitch-yaw)).
 
     i, j, k, r = bno.quaternion
 
