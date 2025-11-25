@@ -130,16 +130,14 @@ The examples directory shows the use of the following sensor reports. Each of th
     stability_str = bno.stability_classification    # string of stability classification returned
     activity_str = bno.activity_classification      # string of activity classification returned
 
-The following functions can be used to tare and calibrate the sensor:
+The following functions can be used to tare and manually calibrate the sensor:
 
     bno.tare  # tare the sensor
 
-    bno.begin_calibration  # begin calibration
-    x, y, z, mag_acc, ts = bno.magnetic.full
-    print(f"Magnetic Accuracy: {REPORT_ACCURACY_STATUS[mag_acc]} = {mag_acc}")
-TODO FIX THIS **********************
-    mag_accuracy = bno.calibration_status  # magnetic calibration status int returned
-    bno.save_calibration_data  # Save calibration
+    bno.begin_calibration 
+    bno.calibration_status
+    # loop to test acceleration, magnetic, gyro  - see examples/test_calibration.py
+    bno.save_calibration_data
 
 ## Option to Change Sensor Report Frequency
 
@@ -161,6 +159,7 @@ Quaternions use several rotation around a single axis and an angle.
 
 - https://base.movella.com/s/article/Understanding-Gimbal-Lock-and-how-to-prevent-it?language=en_US
 - https://en.wikipedia.org/wiki/Gimbal_lock
+- https://en.wikipedia.org/wiki/Quaternions_and_spatial_rotation
 - https://www.youtube.com/watch?v=zjMuIxRvygQ
 
 ## I2C Clock-stretch issues on BNO08x and communication errors

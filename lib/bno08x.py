@@ -41,7 +41,6 @@ TODO: BRC updating sensor values more efficiently: spi @ 3.1ms (322Hz), i2c at 3
 TODO: apply spi optimizations to uart ?  fix UART mis-framing (with quaternions?)
 TODO: test UART with Reset & Interrupt pins
 
-TODO: retest CALIBRATION, expand beyond mag accuracy... also fix that it was only mag
 TODO: add TARE
 """
 
@@ -89,11 +88,11 @@ _FRS_READ_RESPONSE = const(0xF3)
 _COMMAND_REQUEST = const(0xF2)
 _COMMAND_RESPONSE = const(0xF1)
 
-# DCD/ ME Calibration commands and sub-commands
-_SAVE_DCD = const(0x6)
+# ME / DCD Calibration commands and sub-commands
 _ME_CALIBRATE = const(0x7)
 _ME_CAL_CONFIG = const(0x00)
 _ME_GET_CAL = const(0x01)
+_SAVE_DCD = const(0x6)
 
 # Reports Summary depending on BNO device
 BNO_REPORT_ACCELEROMETER = const(0x01)  # bno.acceleration (m/s^2, gravity acceleration included)
@@ -906,9 +905,14 @@ class BNO08X:
 
         return roll, tilt, yaw
 
-    def begin_calibration(self) -> None:
-        """Begin the sensor's self-calibration routine"""
-        # start calibration for accel, gyro, and mag
+    # ======== Motion Engine (ME) Calibration ========
+    @property
+    def begin_calibration(self) -> int:
+        """
+        6.4.6.1 SH-2: Command Request sent by the host to configure the ME calibration
+        of the accelerometer, gyro and magnetometer giving the host the ability to control
+        when calibration is performed.
+        """
         self._send_me_command(
             [
                 1,  # calibrate accel
@@ -917,42 +921,33 @@ class BNO08X:
                 _ME_CAL_CONFIG,
                 0,  # calibrate planar acceleration
                 0,  # 'on_table' calibration
-                0,  # reserved
-                0,  # reserved
-                0,  # reserved
+                0, 0, 0,  # reserved
             ]
         )
         self._calibration_complete = False
+        return
 
     @property
     def calibration_status(self) -> int:
-        """Get the status of the self-calibration"""
-        self._send_me_command(
-            [
-                0,  # calibrate accel
-                0,  # calibrate gyro
-                0,  # calibrate mag
-                _ME_GET_CAL,
-                0,  # calibrate planar acceleration
-                0,  # 'on_table' calibration
-                0,  # reserved
-                0,  # reserved
-                0,  # reserved
-            ]
-        )
-        return self._magnetometer_accuracy
+        """
+        Send request for status command, 
+        """
+        self._send_me_command([ 0, 0, 0, _ME_GET_CAL, 0, 0, 0, 0, 0,])
+        return 
 
-    def _send_me_command(self, subcommand_params) -> None:
+    def _send_me_command(self, me_command) -> None:
         start_time = ticks_ms()
         local_buffer = self._command_buffer
         _insert_command_request_report(
             _ME_CALIBRATE,
-            self._command_buffer,  # should use self._data_buffer :\ but send_packet don't
+            self._command_buffer,  
             self._get_report_seq_id(_COMMAND_REQUEST),
-            subcommand_params,
+            me_command,
         )
         self._send_packet(_BNO_CHANNEL_CONTROL, local_buffer)
         self._increment_report_seq(_COMMAND_REQUEST)
+        
+        # change timeout to checking flag for ME Calbiration Response 6.4.6.3 SH-2
         while _elapsed_sec(start_time) < _DEFAULT_TIMEOUT:
             self._process_available_packets()
             if self._me_calibration_started_at > start_time:
@@ -965,7 +960,7 @@ class BNO08X:
         local_buffer = bytearray(12)
         _insert_command_request_report(
             _SAVE_DCD,
-            local_buffer,  # should use self._data_buffer :\ but send_packet don't
+            local_buffer,  # should use self._data_buffer :\ but send_packet doesn't
             self._get_report_seq_id(_COMMAND_REQUEST),
         )
         self._send_packet(_BNO_CHANNEL_CONTROL, local_buffer)
@@ -975,6 +970,7 @@ class BNO08X:
             if self._dcd_saved_at > start_time:
                 return
         raise RuntimeError("Could not save calibration data")
+    
 
     # Unimplemented (need to add to processing to reports before ARVR reports can be used)
     # @property
@@ -1175,7 +1171,7 @@ class BNO08X:
             self._unread_report_count[feature_report_id] = 0
             return
 
-        # Command Response (0xF1)
+        # Command Response (0xF1) - ME and DCD
         if report_id == _COMMAND_RESPONSE:
             self._handle_command_response(report_bytes)
             return
@@ -1203,26 +1199,19 @@ class BNO08X:
             return
 
     def _handle_command_response(self, report_bytes: bytearray) -> None:
-        (report_body, response_values) = _parse_command_response(report_bytes)
+        (report_body, response) = _parse_command_response(report_bytes)
         (_report_id, _seq_number, command, _command_seq_number, _response_seq_number,) = report_body
 
-        # status, accel_en, gyro_en, mag_en, planar_en, table_en, *_reserved) = response_values
-        command_status, *_rest = response_values
+        cal_status, accel_en, gyro_en, mag_en, planar_en, table_en, *_reserved = response
 
-        if command == _ME_CALIBRATE and command_status == 0:
+        if command == _ME_CALIBRATE and cal_status == 0:
             self._me_calibration_started_at = ticks_ms()
-            self._dbg("_handle_command_response: ME_CALIBRATE success flag set.")
-
-        self.last_cmd_response = {
-            "report_id": _COMMAND_RESPONSE,
-            "seq": _seq_number,
-            "command": command,
-            "status": command_status,
-        }
+            self._dbg("Calibration success at {ticks_ms()=}")
+            print(f"Calibration success at {ticks_ms()=}")
 
         if command == _SAVE_DCD:
-            self._dbg(f"_handle_command_response: DCD Save response detected. Status is {command_status}")
-            if command_status == _COMMAND_STATUS_SUCCESS:
+            self._dbg(f"_handle_command_response: DCD Save response detected. Status is {cal_status}")
+            if cal_status == _COMMAND_STATUS_SUCCESS:
                 self._dcd_saved_at = ticks_ms()
             else:
                 raise RuntimeError(f"Unable to save calibration data, status={command_status}")
