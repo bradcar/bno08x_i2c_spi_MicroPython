@@ -1,27 +1,25 @@
 # bno08x-i2c-spi-micropython
 ## Micropython I2C SPI library BNO08X sensors for 9-axis fusion
 
-bno08x MicroPython driver for I2C, SPI, UART on MicroPython. This is for the BNO086, BNO085, and BNO080. The BNO08x sensors have a variety of sensors that can provide data/results.
+bno08x MicroPython driver for I2C, SPI, UART on MicroPython. This is for the BNO086, BNO085, and BNO080 IMU sensors. The BNO08x sensors have a variety of sensors that can provide data/results.
 Each of these are accessed individually and called reports.
 
 This driver is written to provide to respond to high-frequency reports (short period), and also provides 0.1 msec resolution 
-timestamps for each sensor report. Knowing IMU results together with timestamp of results is critical for many
+timestamps with each sensor report. Knowing IMU results together with timestamp of results is critical for many
 telemetry applications.  
 
-This driver requires that the int_pin and reset_pin be connected to the sensors for operation.
+This driver requires that the int_pin and reset_pin be connected to the sensor for operation.
 
-This library has been tested with BNO086 sensor on Raspberry Pico 2 W. 
-
+This library has been tested with BNO086 sensor on Raspberry Pico 2 W.
 The report frequency will be limited by the interface chosen. 
-SPI is the fastest and SPI is 30% faster than I2c. 
-SPI avoids the bno08x's non-standard I2C clock stretching which occurs during fast operations or many reports.
+SPI is the fastest and SPI is 40% faster than I2C, but more importantly SPI avoids the bno08x's non-standard I2C clock stretching that the BNO08x sensors perform.
 I2C Clock Stretching causes IO errors in these cases.
 SPI is also ?x faster than UART. Choose the report rate and interface that meets your needs.
 
 **Credits - thanks!**
-- 100% inspired by the original Adafruit CircuitPython I2C library for BNO08X, Copyright (c) 2020 Bryan Siepert for Adafruit Industries
-- This code also inspired by feature and fixes written by dobodu
-- thanks in advance for any pull request contributions
+- 100% inspired by the original Adafruit CircuitPython I2C library for BNO08X, Copyright (c) 2020 Bryan Siepert for Adafruit Industries.
+- This code also inspired by feature and fixes written by dobodu.
+- thanks in advance for any pull request contributions.
 
 ## Setting up to use the Sensor
 
@@ -75,7 +73,7 @@ Primary sensor report constants:
         BNO_REPORT_STABILITY_CLASSIFIER
         BNO_REPORT_ACTIVITY_CLASSIFIER
 
-BNO08x documentation uses the words "ROTATION_VECTOR", and we honor that in several of the constants above. 
+BNO08x documentation uses the words "ROTATION_VECTOR", and we honor that in several of the above constants. 
 Most people refer to these as quaternions, which is easier to understand in code.
 In this library, we use bno.quaternion and enable it with "BNO_REPORT_ROTATION_VECTOR".
 Likewise, when bno.game_quaternion is used, please enable it with "BNO_REPORT_GAME_ROTATION_VECTOR".
@@ -163,10 +161,11 @@ Quaternions use several rotation around a single axis and an angle.
 
 - https://base.movella.com/s/article/Understanding-Gimbal-Lock-and-how-to-prevent-it?language=en_US
 - https://en.wikipedia.org/wiki/Gimbal_lock
+- https://www.youtube.com/watch?v=zjMuIxRvygQ
 
 ## I2C Clock-stretch issues on BNO08x and communication errors
 
-Unfortunately, the BNO080, BNO085, and BNO086 all use **_non-standard clock stretching_** on the I2C.
+Unfortunately, the BNO080, BNO085, and BNO086 all use **_non-standard clock stretching_** on I2C.
 This causes a variety of issues including report errors and the need to restart/reset the sensor.
 Clock stretching interferes with various chips (ex: RP2) in different ways.
 If you see ETIMEDOUT, this is likely the issue (BNO08X Datasheet 1000-3927 v1.17, page 15).
@@ -265,7 +264,7 @@ The actual sensor period will vary from the attempted period returned by this fu
     print(f"Accelerometer: {period_ms:.1f} ms, {1_000 / period_ms:.1f} Hz")
 
 Currently On Pico 2 W, the SPI interface can almost service 2ms reports. 
-The fastest updates we've seen on SPI is 3.1 ms (322Hz), I2C is slower at 4.0ms (250Hz). When one requests report frequencies at faster than the microcontroler can service, the period the reporting frequency will slow.
+The fastest updates we've seen on SPI is 3.1 ms (322Hz), I2C is slower at 3.8ms (263Hz). When one requests report frequencies at faster than the microcontroler can service, the period the reporting frequency will slow.
 Try you own experiments and let me know what you find.
 
 Refer to the BNO080_085-Datasheet.pdf (page 50) for Maximum sensor report rates by report type.
@@ -281,7 +280,9 @@ background: https://www.youtube.com/watch?v=0rlvvYgmTvI&t=28s
 
 The raw reports, which do not use sensor fusion calculations, can be accessed for acceleration,
 magnetic, and gyro sensors. It is not generally recommended to use these reports, because they require signficant coding (careful
-calibaration, Kalman filters, etc.). Please read all references below when attempting to use raw reports.
+calibaration, Kalman filters, etc.). Starting background on Fusion algorithms: https://www.youtube.com/watch?v=0rlvvYgmTvI
+
+Please read all references below when attempting to use raw reports.
 
 In addition, there are other sensor reports possible with the bno08x sensors that this driver has not fully
 implemented. See code source for details. The raw sensors timestamps are not well-documented in Ceva documentation.
@@ -299,5 +300,6 @@ The CEVA BNO085 and BNO086 9-axis sensors are made by Ceva (https://www.ceva-ip.
 - https://www.ceva-ip.com/wp-content/uploads/BNO080_085-Datasheet.pdf
 - https://cdn.sparkfun.com/assets/4/d/9/3/8/SH-2-Reference-Manual-v1.2.pdf
 - https://cdn.sparkfun.com/assets/7/6/9/3/c/Sensor-Hub-Transport-Protocol-v1.7.pdf
+- https://cdn.sparkfun.com/assets/9/e/1/d/9/Sensor-Calibration-Procedure-v1.1.pdf
 
 Bosch has a new 6-axis IMU BHI385 (announced June 2025) that can be paired with BMM350 3-axis Geomagnetic sensor.
