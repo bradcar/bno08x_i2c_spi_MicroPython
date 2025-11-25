@@ -165,7 +165,7 @@ _REPORTS_DICTIONARY = {
     0x1A: "FLIP_DETECTOR",
     0x1B: "PICKUP_DETECTOR",
     0x1C: "STABILITY_DETECTOR",
-    0x1E: "PERSONAL_ACTIVITY_CLASSIFIER",
+    0x1E: "ACTIVITY_CLASSIFIER",
     0x1F: "SLEEP_DETECTOR",
     0x20: "TILT_DETECTOR",
     0x21: "POCKET_DETECTOR",
@@ -1371,14 +1371,14 @@ class BNO08X:
         set_feature_report[1] = feature_id
         
         if freq is None:
-            requested_interval = DEFAULT_REPORT_FREQ[feature_id]
+            requested_interval = int(1_000_000 / DEFAULT_REPORT_FREQ[feature_id])
         elif freq == 0:
             requested_interval = 0
         else:
             requested_interval = int(1_000_000 / freq)
 
         pack_into("<I", set_feature_report, 5, requested_interval)
-
+        
         if feature_id == BNO_REPORT_ACTIVITY_CLASSIFIER:
             pack_into("<I", set_feature_report, 13, _ENABLED_ACTIVITIES)
 
@@ -1427,7 +1427,6 @@ class BNO08X:
             print(f"\t{_REPORTS_DICTIONARY[feature_id]}\t{period_ms:.1f} ms, {1_000 / period_ms:.1f} Hz")
             # extended print for debugging
             # print(f"\t{feature_id}: {_REPORTS_DICTIONARY[feature_id]},\t{period_ms:.1f} ms, {1_000 / period_ms:.1f} Hz")
-
 
     def set_orientation(self, quaternion):
         return  # Procedure to be completed and corrected

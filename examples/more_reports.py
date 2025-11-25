@@ -5,18 +5,26 @@
 
 from time import sleep
 
-from bno08x import BNO_REPORT_STEP_COUNTER, BNO_REPORT_STABILITY_CLASSIFIER, BNO_REPORT_ACTIVITY_CLASSIFIER, \
-    BNO_REPORT_SHAKE_DETECTOR
-from i2c import *
+from i2c import BNO08X_I2C
+from bno08x import *
 from machine import I2C, Pin
 
-i2c0 = I2C(0, scl=Pin(13), sda=Pin(12), freq=100_000, timeout=200_000)
-bno = BNO08X_I2C(i2c0, address=0x4B, debug=False)
+int_pin = Pin(14, Pin.IN, Pin.PULL_UP)  # BNO sensor (INT)
+reset_pin = Pin(15, Pin.OUT)  # BNO sensor (RST)
 
-bno.enable_feature(BNO_REPORT_STEP_COUNTER)
+i2c0 = I2C(0, scl=Pin(13), sda=Pin(12), freq=400_000)
+bno = BNO08X_I2C(i2c0, address=0x4b, reset_pin=reset_pin, int_pin=int_pin, debug=False)
+
+print("Start")
+print("I2C devices found:", [hex(d) for d in i2c0.scan()])
+print("===========================")
+
 bno.enable_feature(BNO_REPORT_STABILITY_CLASSIFIER)
 bno.enable_feature(BNO_REPORT_ACTIVITY_CLASSIFIER)
 bno.enable_feature(BNO_REPORT_SHAKE_DETECTOR)
+bno.enable_feature(BNO_REPORT_STEP_COUNTER)
+
+
 print("BNO08x reports enabled\n")
 bno.print_report_period()
 print()
