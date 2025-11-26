@@ -1,4 +1,4 @@
-# more_reports.py
+# test_more_reports.py
 #
 # BNO08x Micropython I2C example program
 #

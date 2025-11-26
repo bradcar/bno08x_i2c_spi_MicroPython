@@ -1,4 +1,4 @@
-# raw_sensors.py
+# test_raw_reports.py
 #
 # BNO08x Micropython I2C example program
 # Raw device reports: raw_accelerometer, raw_magnetic, raw_gyro

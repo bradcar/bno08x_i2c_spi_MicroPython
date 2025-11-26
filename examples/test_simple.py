@@ -1,3 +1,5 @@
+# test_simple.py
+#
 # BNO08x MicroPython I2C Test
 #
 # I2C interface: Test simple sensor report for acceleration
