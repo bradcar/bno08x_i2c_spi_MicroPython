@@ -4,12 +4,11 @@
 # Raw device reports: raw_accelerometer, raw_magnetic, raw_gyro
 #  - raw_accelerometer, raw_magnetic -  return 3 values and time_stamp
 #  - raw_gyro - returnn 3 values, Celsius, and time_stamp
-# timestamp is not clearly described in Ceva documentation
+# note: timestamp is not clearly described in Ceva documentation
 
 from bno08x import *
 from i2c import BNO08X_I2C
 from machine import I2C, Pin
-from utime import ticks_ms
 
 int_pin = Pin(14, Pin.IN, Pin.PULL_UP)  # BNO sensor (INT)
 reset_pin = Pin(15, Pin.OUT)  # BNO sensor (RST)

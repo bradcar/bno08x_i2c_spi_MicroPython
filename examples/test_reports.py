@@ -3,7 +3,7 @@
 # BNO08x MicroPython I2C Test
 #
 # I2C interface: Test common sensor reports:
-# acceleration, magnetic, gryoscope, quaternion, euler
+# acceleration, magnetic, gryoscope, quaternion, quaternion.euler
 
 from time import sleep
 

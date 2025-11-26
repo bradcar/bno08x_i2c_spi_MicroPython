@@ -4,13 +4,9 @@
 #
 # I2C interface: Test simple sensor report for acceleration
 
-from time import sleep
-
-from i2c import BNO08X_I2C
 from bno08x import *
-
+from i2c import BNO08X_I2C
 from machine import I2C, Pin
-from utime import ticks_ms, sleep_us
 
 int_pin = Pin(14, Pin.IN, Pin.PULL_UP)  # BNO sensor (INT)
 reset_pin = Pin(15, Pin.OUT)  # BNO sensor (RST)

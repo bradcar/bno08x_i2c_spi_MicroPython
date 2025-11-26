@@ -2,11 +2,12 @@
 #
 # BNO08x Micropython I2C example program
 #
+# Activity, stability, and steps
 
 from time import sleep
 
-from i2c import BNO08X_I2C
 from bno08x import *
+from i2c import BNO08X_I2C
 from machine import I2C, Pin
 
 int_pin = Pin(14, Pin.IN, Pin.PULL_UP)  # BNO sensor (INT)
@@ -23,7 +24,6 @@ bno.enable_feature(BNO_REPORT_STABILITY_CLASSIFIER)
 bno.enable_feature(BNO_REPORT_ACTIVITY_CLASSIFIER)
 bno.enable_feature(BNO_REPORT_SHAKE_DETECTOR)
 bno.enable_feature(BNO_REPORT_STEP_COUNTER)
-
 
 print("BNO08x reports enabled\n")
 bno.print_report_period()

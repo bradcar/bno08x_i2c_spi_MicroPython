@@ -36,19 +36,24 @@ Delay
    the delay field may be populated, then delay and the timebase reference
    are used to calculate the sensor sample's actual timestamp.
 
-TODO: BRC updating sensor values more efficiently: spi @ 3.1ms (322Hz), i2c at 3.8ms (263 Hz) uart at ?.?ms (?Hz).
+Cuurrent sensor update periods:
+- spi:   3.0ms (333 Hz)
+- i2c:   3.8ms (263 Hz)
+- uart: 16.0ms ( 62 Hz)
 
 TODO: apply spi optimizations to uart ?  fix UART mis-framing (with quaternions?)
 TODO: test UART with Reset & Interrupt pins
 
-TODO: add TARE
+Possible future projects, some have partial coding already in place
+FUTURE: explore adding simple 180 degree calibration(0x0c), page 55 SH-2
+FUTURE: include estimated ange in full quaternion implementation, maybe make new modifier bno.quaternion.est ?
+FUTURE: process ARVR rotation and
 """
-
-__version__ = "0.1"
+__version__ = "0.7"
 __repo__ = "https://github.com/bradcar/bno08x_i2c_spi_MicroPython"
 
 from math import asin, atan2, degrees
-from struct import pack_into, unpack_from
+from struct import pack_into, unpack_from, pack
 
 import uctypes
 from collections import namedtuple
@@ -90,26 +95,30 @@ _COMMAND_RESPONSE = const(0xF1)
 
 # ME / DCD Calibration commands and sub-commands
 _ME_TARE_COMMAND = const(0x03)
-_ME_CALIBRATE_COMMAND = const(0x7)
+_SAVE_DCD_COMMAND = const(0x06)
+_ME_CALIBRATE_COMMAND = const(0x07)
 
-#ME/DCD Subcommads
+# possible to implement
+_CALIBRATION_COMMAND = const(0x0c)
+_INTERACTIVE_CALIBRATION_COMMAND = const(0x0e)
+
+# ME/DCD Subcommads
 _ME_CAL_CONFIG = const(0x00)
 _ME_GET_CAL = const(0x01)
 _ME_TARE_NOW = const(0x00)
 _ME_PERSIST_TARE = const(0x01)
 _ME_TARE_SET_REORIENTATION = const(0x02)
-_SAVE_DCD = const(0x6)
 
 # Reports Summary depending on BNO device
 BNO_REPORT_ACCELEROMETER = const(0x01)  # bno.acceleration (m/s^2, gravity acceleration included)
 BNO_REPORT_GYROSCOPE = const(0x02)  # bno.gyro (rad/s).
 BNO_REPORT_MAGNETOMETER = const(0x03)  # bno.magnetic (in µTesla).
-BNO_REPORT_LINEAR_ACCELERATION = const(0x04)  #  bno.linear_acceleration (m/^2, no gravity acceleration)
-BNO_REPORT_ROTATION_VECTOR = const(0x05)   #  bno.quaternion
-BNO_REPORT_GRAVITY = const(0x06)  #  bno.gravity
+BNO_REPORT_LINEAR_ACCELERATION = const(0x04)  # bno.linear_acceleration (m/^2, no gravity acceleration)
+BNO_REPORT_ROTATION_VECTOR = const(0x05)  # bno.quaternion
+BNO_REPORT_GRAVITY = const(0x06)  # bno.gravity
 BNO_REPORT_UNCALIBRATED_GYROSCOPE = const(0x07)
-BNO_REPORT_GAME_ROTATION_VECTOR = const(0x08)   # bno.game_quaternion
-BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR = const(0x09) #  bno.geomagnetic_quaternion
+BNO_REPORT_GAME_ROTATION_VECTOR = const(0x08)  # bno.game_quaternion
+BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR = const(0x09)  # bno.geomagnetic_quaternion
 BNO_REPORT_PRESSURE = const(0x0A)
 BNO_REPORT_AMBIENT_LIGHT = const(0x0B)
 BNO_REPORT_HUMIDITY = const(0x0C)
@@ -236,7 +245,6 @@ DEFAULT_REPORT_FREQ = {
 
 _Q_POINT_14_SCALAR = 2 ** (14 * -1)
 _Q_POINT_12_SCALAR = 2 ** (12 * -1)
-# _Q_POINT_10_SCALAR = 2 ** (10 * -1)
 _Q_POINT_9_SCALAR = 2 ** (9 * -1)
 _Q_POINT_8_SCALAR = 2 ** (8 * -1)
 _Q_POINT_4_SCALAR = 2 ** (4 * -1)
@@ -257,18 +265,17 @@ _RAW_REPORTS = {
     BNO_REPORT_UNCALIBRATED_MAGNETOMETER: BNO_REPORT_MAGNETOMETER,  # For testing
 }
 
-# The last cause of the processor reset.
+# cause of the last sensor reset.
 _RESET_CAUSE_STRING = [
     "Not Applicable",
     "Power On Reset",
-    "Internal System Reset",
+    "Internal System Reset",  # soft resest, send command
     "Watchdog Timeout",
-    "External Reset",
+    "External Reset",  # hard resest
     "Other",
 ]
 
-# Available sensor reports
-# TODO double check the Q points, also seem ARVR needs 13 for accuracy est?
+# sensor reports (scalar, #results (without .full), bytes in sensor report packet
 _AVAIL_SENSOR_REPORTS = {
     BNO_REPORT_ACCELEROMETER: (_Q_POINT_8_SCALAR, 3, 10),
     BNO_REPORT_GYROSCOPE: (_Q_POINT_9_SCALAR, 3, 10),
@@ -302,13 +309,12 @@ _TARE_BASIS_ENCODES = {
     BNO_REPORT_GAME_ROTATION_VECTOR: 1,
     BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR: 2,
     BNO_REPORT_GYRO_INTEGRATED_ROTATION_VECTOR: 3,
-    # The last two are unimplemented reports, included with correct placeholders
+    # FUTURE: ARVR are unimplemented reports, included with correct placeholders
     BNO_REPORT_ARVR_STABILIZED_ROTATION_VECTOR: 4,
     BNO_REPORT_ARVR_STABILIZED_GAME_ROTATION_VECTOR: 5,
 }
 
 # C-style layout for standard BNO08x sensor reports 16-bit
-# Offsets follow the BNO08x standard header structure
 _SENSOR_REPORT_LAYOUT = {
     "report_id": 0 | uctypes.UINT8,
     "status": 1 | uctypes.UINT8,
@@ -324,6 +330,7 @@ _SENSOR_REPORT_LAYOUT = {
     "e1": 12 | uctypes.INT16,  # only valid for rotation & ARVR rotation report: quaternion + angle estimate
 }
 
+# tuples for main data, accuracy, and delta
 _INITIAL_REPORTS = {
     BNO_REPORT_ACTIVITY_CLASSIFIER: {
         "Tilting": -1,
@@ -390,13 +397,6 @@ def _elapsed_sec(start_time):
 
 
 ############ COMMAND PARSING ###########################
-def _parse_command_response(report_bytes: bytearray):
-    # CMD response report:
-    # 5 bytes: Report ID = 0xF1, Sequence number, Command, Command sequence , Response sequence
-    # 11 bytes: R0-10 A set of response values for each command.
-    report_body = unpack_from("<BBBBB", report_bytes)
-    response_values = unpack_from("<BBBBBBBBBBB", report_bytes, 5)
-    return report_body, response_values
 
 def _insert_command_request_report(
         command: int,
@@ -462,12 +462,12 @@ class Packet:
 
     @classmethod
     def header_from_buffer(cls, packet_bytes: bytearray) -> PacketHeader:
-        """Creates a `PacketHeader` object from a given buffer"""        
+        """Creates a `PacketHeader` object from a given buffer"""
         header_data = unpack_from("<HBB", packet_bytes, 0)
         packet_byte_count = header_data[0] & ~0x8000
         channel_number = header_data[1]
         sequence_number = header_data[2]
-        
+
         data_length = max(0, packet_byte_count - 4)
         header = PacketHeader(channel_number, sequence_number, data_length, packet_byte_count)
         return header
@@ -512,11 +512,13 @@ class SensorReading3:
             f"accuracy={self.accuracy}, timestamp_us={self.timestamp_us})"
         )
 
+
 class SensorReading4:
     """
     4-element reading with optional metadata.
     two reports are really SensorReading5 reports, few users need the est so we process it here in SensorReading4
-    bno.quaternion (BNO_REPORT_ROTATION_VECTOR) is actually 5-tuple, we ignore estimated angle
+    bno.quaternion (BNO_REPORT_ROTATION_VECTOR) is actually 5-tuple,
+    *** FUTURE maybe not ignore quaternion's estimated angle
     bno.geomagnetic_quaternion(BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR): is actually 5-tuple, we ignore estimated angle
     FUTURE: Explore if this estimated angle is needed and how to expose it simply to both allow simple usage
             and this capability for advanced users
@@ -561,10 +563,13 @@ class SensorReading4:
             f"accuracy={self.accuracy}, timestamp_us={self.timestamp_us})"
         )
 
+
 class SensorReading5:
     """
     5-element reading with optional metadata.
-    TODO: process ARVR rotation and full quaternion implementation wth estimated angle
+    FUTURE: process ARVR rotation
+    FUTURE: full quaternion implementation wth estimated angle, maybe quaternion.est or uaternion.est_angle
+    FUTURE: ARVR will need Q-point 13 for accuracy est, it's different from its other data
     """
     __slots__ = ("v1", "v2", "v3", "v4", "e1", "accuracy", "timestamp_us")
 
@@ -619,10 +624,10 @@ class BNO08X:
         self._int_pin = int_pin
         self._wake_pin = wake_pin
         self._cs_pin = cs_pin
-        
+
         # set int_pin interrupt, Active-low interrupt → falling edge
         self._int_pin.irq(trigger=Pin.IRQ_FALLING, handler=self._on_interrupt)
-        
+
         self._dbg(f"********** __init__ on {_interface} Interface *************\n")
         self._data_buffer: bytearray = bytearray(DATA_BUFFER_SIZE)
         self._data_buffer_memoryview = memoryview(self._data_buffer)
@@ -648,19 +653,18 @@ class BNO08X:
         self._reset_mismatch = False  # if reset_pin set make sure hardware reset done, else pin bad
         # dictionary of most recent values from each enabled sensor report
         self._report_values = {}
-        # dictionary of reports received but not yet read by user
+        # dictionary of updated sensor reports values, not yet read by user
         self._unread_report_count = {}
         self._report_periods_dictionary_us = {}
 
         self.reset_sensor()
-        
+
         # There has been significant commmunication and int_pin activity by this point,
         # if No int_pin interrupt, then raise error
         if self.last_interrupt_us == 0:
             raise RuntimeError("No int_pin signals, check int_pin wiring")
-        
-        self._dbg("********** End __init__ *************\n")
 
+        self._dbg("********** End __init__ *************\n")
 
     def _on_interrupt(self, pin):
         """
@@ -693,8 +697,8 @@ class BNO08X:
             except OSError as e:
                 self._dbg(f"Attempt {attempt + 1} failed with OSError: {e}")
 
-            sleep_ms(600)  # TODO BRC revisit if this duration is really needed
-        #
+            sleep_ms(600)  # Is this excessive?
+
         raise RuntimeError(f"Failed to get valid Report ID (0xf8) with {reset_type} reset")
 
     ############ USER VISIBLE REPORT FUNCTIONS ###########################
@@ -764,7 +768,8 @@ class BNO08X:
             i, j, k, r, acc, ts = self._report_values[BNO_REPORT_ROTATION_VECTOR]
             return SensorReading4(i, j, k, r, acc, ts)
         except KeyError:
-            raise RuntimeError("quaternion report not enabled, use bno.enable_feature(BNO_REPORT_ROTATION_VECTOR)") from None
+            raise RuntimeError(
+                "quaternion report not enabled, use bno.enable_feature(BNO_REPORT_ROTATION_VECTOR)") from None
 
     @property
     def geomagnetic_quaternion(self):
@@ -775,7 +780,8 @@ class BNO08X:
             i, j, k, r, acc, ts = self._report_values[BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR]
             return SensorReading4(i, j, k, r, acc, ts)
         except KeyError:
-            raise RuntimeError("geomagnetic quaternion report not enabled, use bno.enable_feature(BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR)") from None
+            raise RuntimeError(
+                "geomagnetic quaternion report not enabled, use bno.enable_feature(BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR)") from None
 
     @property
     def game_quaternion(self):
@@ -788,10 +794,11 @@ class BNO08X:
             i, j, k, r, acc, ts = self._report_values[BNO_REPORT_GAME_ROTATION_VECTOR]
             return SensorReading4(i, j, k, r, acc, ts)
         except KeyError:
-            raise RuntimeError("game quaternion report not enabled, use bno.enable_feature(BNO_REPORT_GAME_ROTATION_VECTOR)") from None
-        
+            raise RuntimeError(
+                "game quaternion report not enabled, use bno.enable_feature(BNO_REPORT_GAME_ROTATION_VECTOR)") from None
+
     # raw reports to not support .full
-    
+
     @property
     def raw_acceleration(self):
         """raw acceleration unscaled/uncalibrated from raw registers"""
@@ -921,7 +928,7 @@ class BNO08X:
         return roll, tilt, yaw
 
     # ======== Motion Engine (ME) Tare and Calibration (manual) ========
-   
+
     def tare(self, axis=0x07, basis=None) -> int:
         """
         Tare the sensor
@@ -936,36 +943,36 @@ class BNO08X:
             encode = _TARE_BASIS_ENCODES[basis]
         else:
             raise ValueError(f"Unknown Tare Basis Report ID: {basis}")
-        
-        # ARVR rotation vectors currently unimplemented
+
+        # FUTURE: ARVR rotation vectors currently unimplemented
         if encode in (4, 5):
             raise NotImplementedError("This ARVR Tare Basis is currently unimplemented.")
-        
-        self._dbg(f"TARE: using {hex(basis)=} on {axis=}, {encode=}...")        
+
+        self._dbg(f"TARE: using {hex(basis)=} on {axis=}, {encode=}...")
         self._send_me_command(_ME_TARE_COMMAND,
-            [
-                _ME_TARE_NOW,  # Perform Tare Now
-                axis,  # Perform All axis (7) by default
-                encode,  # rotation vector (quaternion) to be tared
-                0, 0, 0, 0, 0, 0,  # 6-11 Reserved
-            ]
-        )
+                              [
+                                  _ME_TARE_NOW,  # Perform Tare Now
+                                  axis,  # Perform All axis (7) by default
+                                  encode,  # rotation vector (quaternion) to be tared
+                                  0, 0, 0, 0, 0, 0,  # 6-11 Reserved
+                              ]
+                              )
         return axis, encode
-    
+
     @property
-    def clear_tare(self) -> boolean:
+    def clear_tare(self):
         """
         Clear the Tare data to flash
         """
-        self._dbg(f"TARE: Clear Tare...")        
+        self._dbg(f"TARE: Clear Tare...")
         self._send_me_command(_ME_TARE_COMMAND,
-            [
-                _ME_TARE_SET_REORIENTATION,  # reorientate
-                0, 0, 0, 0, 0, 0, 0, 0,  # 1-8 Reserved
-            ]
-        )
+                              [
+                                  _ME_TARE_SET_REORIENTATION,  # reorientate
+                                  0, 0, 0, 0, 0, 0, 0, 0,  # 1-8 Reserved
+                              ]
+                              )
         return True
-    
+
     def tare_reorientation(self, i, j, k, r) -> bool:
         """
         Send quaternion reorientation for tare.
@@ -978,30 +985,30 @@ class BNO08X:
         qr = int(r * (1 << 14))
 
         # Pack into 8 bytes, little-endian
-        payload = struct.pack("<hhhh", qi, qj, qk, qr)
+        payload = pack("<hhhh", qi, qj, qk, qr)
 
         self._dbg(f"TARE: q_int = {(qi, qj, qk, qr)}")
         self._dbg(f"TARE: raw bytes = {[hex(b) for b in payload]}")
-        
+
         params = [_ME_TARE_SET_REORIENTATION] + list(payload)
         self._send_me_command(_ME_TARE_COMMAND, params)
 
         return True
-    
+
     @property
-    def save_tare_data(self) -> boolean:
+    def save_tare_data(self):
         """
         Save the Tare data to flash
         """
-        self._dbg(f"TARE Persist data to flash...")        
+        self._dbg(f"TARE Persist data to flash...")
         self._send_me_command(_ME_TARE_COMMAND,
-            [
-                _ME_PERSIST_TARE,  # Persist Tare
-                0, 0, 0, 0, 0, 0, 0, 0,  # 1-8 Reserved
-            ]
-        )
+                              [
+                                  _ME_PERSIST_TARE,  # Persist Tare
+                                  0, 0, 0, 0, 0, 0, 0, 0,  # 1-8 Reserved
+                              ]
+                              )
         return True
-        
+
     @property
     def begin_calibration(self) -> int:
         """
@@ -1011,26 +1018,26 @@ class BNO08X:
         when calibration is performed.
         """
         self._send_me_command(_ME_CALIBRATE_COMMAND,
-            [
-                1,  # calibrate accel
-                1,  # calibrate gyro
-                1,  # calibrate mag
-                _ME_CAL_CONFIG,
-                0,  # calibrate planar acceleration
-                0,  # 'on_table' calibration
-                0, 0, 0,  # reserved
-            ]
-        )
+                              [
+                                  1,  # calibrate accel
+                                  1,  # calibrate gyro
+                                  1,  # calibrate mag
+                                  _ME_CAL_CONFIG,
+                                  0,  # calibrate planar acceleration
+                                  0,  # 'on_table' calibration
+                                  0, 0, 0,  # reserved
+                              ]
+                              )
         self._calibration_started = False
         return
 
     @property
     def calibration_status(self) -> int:
         """
-        See if Request for manual calibration accepted
+        Check if Request for manual calibration accepted by sensor
         Wait till calibration ready, Send request for status command, wait for response.
         """
-        self._send_me_command(_ME_CALIBRATE_COMMAND, [ 0, 0, 0, _ME_GET_CAL, 0, 0, 0, 0, 0,])
+        self._send_me_command(_ME_CALIBRATE_COMMAND, [0, 0, 0, _ME_GET_CAL, 0, 0, 0, 0, 0, ])
         return self._calibration_started
 
     def _send_me_command(self, me_type, me_command) -> None:
@@ -1039,13 +1046,13 @@ class BNO08X:
         local_buffer = self._command_buffer
         _insert_command_request_report(
             me_type,
-            self._command_buffer,  
+            self._command_buffer,
             self._get_report_seq_id(_COMMAND_REQUEST),
             me_command,
         )
         self._send_packet(_BNO_CHANNEL_CONTROL, local_buffer)
         self._increment_report_seq(_COMMAND_REQUEST)
-        
+
         # change timeout to checking flag for ME Calbiration Response 6.4.6.3 SH-2
         while _elapsed_sec(start_time) < _DEFAULT_TIMEOUT:
             self._process_available_packets()
@@ -1053,13 +1060,12 @@ class BNO08X:
                 break
 
     def save_calibration_data(self) -> None:
-        """Save the self-calibration data"""
-        # send a DCD save command
+        """Save the self-calibration data uwing DCD save command"""
         start_time = ticks_ms()
         local_buffer = bytearray(12)
         _insert_command_request_report(
-            _SAVE_DCD,
-            local_buffer,  # should use self._data_buffer :\ but send_packet doesn't
+            _SAVE_DCD_COMMAND,
+            local_buffer,
             self._get_report_seq_id(_COMMAND_REQUEST),
         )
         self._send_packet(_BNO_CHANNEL_CONTROL, local_buffer)
@@ -1069,9 +1075,8 @@ class BNO08X:
             if self._dcd_saved_at > start_time:
                 return
         raise RuntimeError("Could not save calibration data")
-    
 
-    # Unimplemented (need to add to processing to reports before ARVR reports can be used)
+    # FUTURE: Unimplemented (need to add to processing to reports before ARVR reports can be used)
     # @property
     # def arvr_stablized_rotation(self):
     #     """
@@ -1106,22 +1111,20 @@ class BNO08X:
 
     def _process_available_packets(self, max_packets: int = 10) -> bool:
         """
-        Read and handle up to `max_packets` packets while a new interrupt is available.
-        safety timeout if data ready stuck
-        If _read_packet() does not return all data for one interrupt,
-        we may need a “drain loop” until no more packets exist.
+        Read and handle up to `max_packets` packets while processing an interrupt
+        If _read_packet() does not return all data for one interrupt, we may need a “drain loop”
         """
         processed_count = 0
         start_time = ticks_ms()
 
         while self._data_ready and processed_count < max_packets:
-            
+
             if ticks_diff(ticks_ms(), start_time) > 1:
                 # commented out self._dbg in time critical loops
                 # self._dbg("1 ms Timeout in _process_available_packets")
                 # self._dbg(f"* {processed_count=}")
                 break
-            
+
             try:
                 new_packet = self._read_packet(wait=False)
             except PacketError:
@@ -1143,11 +1146,10 @@ class BNO08X:
         # self._dbg(f"_process_available_packets done, {processed_count} packets processed - {flag}")
         return flag
 
-
     def _wait_for_packet_type(self, channel, timeout=3.0):
         """
-        Wait for a packet from the specified channel.
-        Returns the first valid packet from that channel.
+        Wait for a first packet on the specified channel.
+        Returns: packet
         """
         start_time = ticks_ms()
         while _elapsed_sec(start_time) < timeout:
@@ -1199,7 +1201,6 @@ class BNO08X:
         seq = new_packet.header.sequence_number
         self._rx_sequence_number[channel] = seq
 
-
     def _handle_packet(self, packet):
         """
         Split a single packet into multiple reports and process them in FIFO order.
@@ -1236,7 +1237,7 @@ class BNO08X:
                 self._process_report(report_id, report_view)
                 report_count += 1
                 next_byte_index += required_bytes
-                
+
             # commented out self._dbg in time critical loops
             # self._dbg(f"HANDLING {report_count} PACKET{'S' if report_count > 1 else ''}...")
 
@@ -1288,7 +1289,7 @@ class BNO08X:
             self._dbg(f"*** Part Number: {sw_part_number}")
             self._dbg(f"*** Software Version: {sw_major}.{sw_minor}.{sw_patch}")
             self._dbg(f"\tBuild: {sw_build_number}\n")
-            
+
             # only first Product ID Response has reset cause, if reset_pin make sure hardware performed
             if reset_cause != 0:
                 if self._reset_pin is not None:
@@ -1298,7 +1299,8 @@ class BNO08X:
             return
 
     def _handle_command_response(self, report_bytes: bytearray) -> None:
-        (report_body, response) = _parse_command_response(report_bytes)
+        report_body = unpack_from("<BBBBB", report_bytes)
+        response = unpack_from("<BBBBBBBBBBB", report_bytes, 5)
         (_report_id, _seq_number, command, _command_seq_number, _response_seq_number,) = report_body
 
         cal_status, accel_en, gyro_en, mag_en, planar_en, table_en, *_reserved = response
@@ -1308,19 +1310,19 @@ class BNO08X:
             self._calibration_started = True
             self._dbg("eady to start calibration at {ticks_ms()=}")
 
-        if command == _SAVE_DCD:
-            self._dbg(f"DCD Save calibration sucess. Status is {cal_status}")
+        if command == _SAVE_DCD_COMMAND:
+            self._dbg(f"DCD Save calibration success. Status is {cal_status}")
             if cal_status == _COMMAND_STATUS_SUCCESS:
                 self._dcd_saved_at = ticks_ms()
             else:
-                raise RuntimeError(f"Unable to save calibration data, status={command_status}")
+                raise RuntimeError(f"Unable to save calibration data with _SAVE_DCD, status={cal_status}")
 
     def _process_report(self, report_id: int, report_bytes: bytearray) -> None:
         """
         Process reports both sensor and control reports
 
-        Extracted accuracy and delay from sensor report (100usec ticks)
-        Multiple reports are processed in the order they appear in the packet buffer.
+        Extract accuracy and delay from sensor report (100 usec ticks)
+        Multiple reports are processed in the order they appear in the packet stream.
         Last sensor report's value over-write previous in this packet.
         The first (oldest) report sets self._report_values[report_id],
         """
@@ -1385,7 +1387,7 @@ class BNO08X:
             return
 
         if report_id == BNO_REPORT_SHAKE_DETECTOR:
-            # shake in X, Y, or Z axes (mask lower 3 bits: 0x07)
+            # shake in any axis (X, Y, or Z enabled by mask of 3 bits: 0x07)
             shake_bitfield = unpack_from("<H", report_bytes, 4)[0]
             shake_detected = (shake_bitfield & 0x07) != 0
 
@@ -1419,7 +1421,7 @@ class BNO08X:
 
         # Raw Magnetometer: returns 4-tuple: x, y, z, and time_stamp
         # Raw accelerometer: returns 4-tuple: x, y, z, and time_stamp
-        # time_stamp units in microseconds
+        # time_stamp units in microseconds - interpretation?
         if report_id in (BNO_REPORT_RAW_ACCELEROMETER, BNO_REPORT_RAW_MAGNETOMETER):
             x, y, z = unpack_from("<HHH", report_bytes, 4)
             time_stamp = unpack_from("<I", report_bytes, 12)[0]
@@ -1443,7 +1445,6 @@ class BNO08X:
 
         raise NotImplementedError(f"Report Type ({report_id}) is not supported.")
 
-
     # Enable a given feature/sensor of the BNO08x (See Hillcrest 6.5.4)
     def enable_feature(self, feature_id, freq=None):
         """
@@ -1455,7 +1456,7 @@ class BNO08X:
         set_feature_report = bytearray(17)
         set_feature_report[0] = _SET_FEATURE_COMMAND
         set_feature_report[1] = feature_id
-        
+
         if freq is None:
             requested_interval = int(1_000_000 / DEFAULT_REPORT_FREQ[feature_id])
         elif freq == 0:
@@ -1464,7 +1465,7 @@ class BNO08X:
             requested_interval = int(1_000_000 / freq)
 
         pack_into("<I", set_feature_report, 5, requested_interval)
-        
+
         if feature_id == BNO_REPORT_ACTIVITY_CLASSIFIER:
             pack_into("<I", set_feature_report, 13, _ENABLED_ACTIVITIES)
 
@@ -1483,7 +1484,7 @@ class BNO08X:
             data = report_bytes.data
             fid = data[1]
             report_interval = unpack_from("<I", data, 5)[0]
-            
+
             self._report_values[feature_id] = _INITIAL_REPORTS.get(feature_id, (0.0, 0.0, 0.0, 0, 0))
             self._report_periods_dictionary_us[feature_id] = report_interval
             self._dbg(f"Report enabled: {_REPORTS_DICTIONARY[fid]}: {hex(fid)}")
@@ -1495,59 +1496,51 @@ class BNO08X:
         except RuntimeError:
             raise RuntimeError(f"BNO08X: enable_feature: not able to enable feature: {hex(feature_id)}")
 
-
     def report_period_us(self, feature_id):
-        """
-        return: report period in us (microseconds, not ms milliseconds)
-        """
+        """ return report period in us (microseconds, not ms milliseconds)"""
         return self._report_periods_dictionary_us[feature_id]
 
     def print_report_period(self):
-        """
-        Print out
-        :return:
-        """
+        """ Print list of report periods to console, if programatic needed use report_period_us"""
         print(f"Enabled Report Periods and Hz:")
         for feature_id in self._report_periods_dictionary_us.keys():
             period_ms = self.report_period_us(feature_id) / 1000.0
             print(f"\t{_REPORTS_DICTIONARY[feature_id]}\t{period_ms:.1f} ms, {1_000 / period_ms:.1f} Hz")
-            # extended print for debugging
-            # print(f"\t{feature_id}: {_REPORTS_DICTIONARY[feature_id]},\t{period_ms:.1f} ms, {1_000 / period_ms:.1f} Hz")
 
     def set_orientation(self, quaternion):
+        """
+                # set orientation of the system
+                self._dbg("DEVICE ORIENTATION SETTING UP...")
+                set_orientation = bytearray(17)
+                set_orientation[0] = FRS_WRITE_REQUEST
+                set_orientation[1] = 0,  # reserved
+                set_orientation[2] = 0,  # Length LSB
+                set_orientation[3] = BNO_CONF_SYSTEM_ORIENTATION & 0xFF,  # FRS Type LSB
+                set_orientation[4] = BNO_CONF_SYSTEM_ORIENTATION >> 80,  # FRS Type MSB
+
+                self._send_packet(BNO_CHANNEL_CONTROL, set_orientation)
+
+                set_orientation[0] = FRS_WRITE_DATA
+                set_orientation[1] = 0,  # reserved
+                set_orientation[2] = 0,  # Offset LSB
+                set_orientation[3] = 0,  # Offset MSB
+                set_orientation[4] = ORENT_QW & 0xFF,  # Data0 LSB
+                set_orientation[5] = ORENT_QW >> 8,  # Data0 MSB
+                set_orientation[6] = 0,  # Offset LSB
+                set_orientation[7] = 0,  # Offset MSB
+                set_orientation[8] = ORENT_QX & 0xFF,  # Data1 LSB
+                set_orientation[9] = ORENT_QX >> 8,  # Data1 MSB
+                set_orientation[10] = 0,  # Offset LSB
+                set_orientation[11] = 0,  # Offset MSB
+                set_orientation[12] = ORENT_QY & 0xFF,  # Data2 LSB
+                set_orientation[13] = ORENT_QY >> 8,  # Data2 MSB
+                set_orientation[14] = 0,  # Offset LSB
+                set_orientation[15] = 0,  # Offset MSB
+                set_orientation[16] = ORENT_QZ & 0xFF,  # Data2 LSB
+                set_orientation[17] = ORENT_QZ >> 8,  # Data2 MSB
+                self._send_packet(BNO_CHANNEL_CONTROL, set_orientation)
+                """
         return  # Procedure to be completed and corrected
-        # set orientation of the system
-        self._dbg("DEVICE ORIENTATION SETTING UP...")
-        set_orientation = bytearray(17)
-        set_orientation[0] = FRS_WRITE_REQUEST
-        set_orientation[1] = 0,  # reserved
-        set_orientation[2] = 0,  # Length LSB
-        set_orientation[3] = BNO_CONF_SYSTEM_ORIENTATION & 0xFF,  # FRS Type LSB
-        set_orientation[4] = BNO_CONF_SYSTEM_ORIENTATION >> 80,  # FRS Type MSB
-
-        self._send_packet(BNO_CHANNEL_CONTROL, set_orientation)
-
-        set_orientation[0] = FRS_WRITE_DATA
-        set_orientation[1] = 0,  # reserved
-        set_orientation[2] = 0,  # Offset LSB
-        set_orientation[3] = 0,  # Offset MSB
-        set_orientation[4] = ORENT_QW & 0xFF,  # Data0 LSB
-        set_orientation[5] = ORENT_QW >> 8,  # Data0 MSB
-        set_orientation[6] = 0,  # Offset LSB
-        set_orientation[7] = 0,  # Offset MSB
-        set_orientation[8] = ORENT_QX & 0xFF,  # Data1 LSB
-        set_orientation[9] = ORENT_QX >> 8,  # Data1 MSB
-        set_orientation[10] = 0,  # Offset LSB
-        set_orientation[11] = 0,  # Offset MSB
-        set_orientation[12] = ORENT_QY & 0xFF,  # Data2 LSB
-        set_orientation[13] = ORENT_QY >> 8,  # Data2 MSB
-        set_orientation[14] = 0,  # Offset LSB
-        set_orientation[15] = 0,  # Offset MSB
-        set_orientation[16] = ORENT_QZ & 0xFF,  # Data2 LSB
-        set_orientation[17] = ORENT_QZ >> 8,  # Data2 MSB
-
-        self._send_packet(BNO_CHANNEL_CONTROL, set_orientation)
-
 
     def _check_id(self):
         """
@@ -1585,7 +1578,6 @@ class BNO08X:
         if self._debug:
             print("DBG::\t\t", *args, **kwargs)
 
-
     def _hard_reset(self) -> None:
         """Hardware reset the sensor to an initial unconfigured state"""
         if not self._reset_pin:
@@ -1598,7 +1590,6 @@ class BNO08X:
         sleep_us(10)  # sleep_us(1), data sheet say only 10ns required,
         self._reset_pin.value(1)
         sleep_ms(500)  # orig was 10ms, datasheet implies 94 ms required
-        
         self._dbg("*** Hard Reset End, awaiting acknowledgement (0xf8)")
 
     def _soft_reset(self) -> None:
@@ -1610,20 +1601,18 @@ class BNO08X:
         self._dbg(f"*** Soft Reset, Channel={BNO_CHANNEL_EXE} command={_BNO08X_CMD_RESET}, starting...")
         reset_payload = bytearray([_BNO08X_CMD_RESET])
         self._send_packet(BNO_CHANNEL_EXE, reset_payload)
-        sleep_ms(500) # seems to be best with 500ms
-
+        sleep_ms(500)  # seems to be best with 500ms
         start_time = ticks_ms()
         self._dbg("Process packets, until get Product ID report (0xf8)...")
 
-        # Loop for a short period to process reports (like Timestamp or Command Response)
+        # Loop for a short period processing reports (like Timestamp or Command Response)
         while _elapsed_sec(start_time) < 1.0:
             try:
-                # Check for enough bytes for a header (4) to prevent blocking indefinitely
                 if not self._data_ready:
                     sleep_ms(10)
                     continue
 
-                packet = self._read_packet()
+                packet = self._read_packet(wait=True)  # TODO is Wait=True correct?
                 self._handle_packet(packet)
                 self._dbg(f"Initial packet, Channel {packet.channel_number} (Seq {packet.sequence_number}).")
 
@@ -1653,7 +1642,7 @@ class BNO08X:
     def _send_packet(self, channel, data):
         raise RuntimeError("_send_packet Not implemented in bno08x.py, supplanted by I2C or SPI subclass")
 
-    def _read_packet(self):
+    def _read_packet(self, wait):
         raise RuntimeError("_read_packet Not implemented in bno08x.py, supplanted by I2C or SPI subclass")
 
     # TODO change these to using self._tx_sequence_number, likely better to put into methods that use them
@@ -1673,6 +1662,7 @@ class BNO08X:
         if self.last_interrupt_us != self.prev_interrupt_us:
             return True
         return False
+
 
 # must define alias after BNO08X class, so class SensorReading4 class can use this
 euler_conversion = BNO08X.euler_conversion

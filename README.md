@@ -25,9 +25,9 @@ SPI is also 5.3x faster than UART. Choose the report rate and interface that mee
 
 ### I2C Setup
 
-    from machine import I2C, Pin
-    from i2c import BNO08X_I2C
     from bno08x import *
+    from i2c import BNO08X_I2C
+    from machine import I2C, Pin
 
     int_pin = Pin(14, Pin.IN, Pin.PULL_UP)  # BNO sensor (INT)
     reset_pin = Pin(15, Pin.OUT)  # BNO sensor (RST)
@@ -178,9 +178,9 @@ On the Sparkfun BNO086 when using SPI, you must clear i2c jumper when using SPI 
 
  SPI must be set to baudrate=3_000_000 (only).
 
-    from machine import SPI, Pin
-    from spi import BNO08X_SPI
     from bno08x import *
+    from i2c import BNO08X_I2C
+    from machine import I2C, Pin
 
     int_pin = Pin(14, Pin.IN, Pin.PULL_UP)  # BNO sensor (INT)
     reset_pin = Pin(15, Pin.OUT)  # BNO sensor (RST)
@@ -204,9 +204,9 @@ Optional for SPI:
 
  UART must be set to baudrate=3_000_000 (only).
 
-    from machine import UART, Pin
-    from uart import BNO08X_UART
     from bno08x import *
+    from i2c import BNO08X_I2C
+    from machine import I2C, Pin
     
     int_pin = Pin(14, Pin.IN, Pin.PULL_UP)  # Interrupt, BNO (RST) signals when ready
     reset_pin = Pin(15, Pin.OUT, value=1)  # Reset, tells BNO (INT) to reset
@@ -273,9 +273,25 @@ Try you own experiments and let me know what you find.
 
 Refer to the BNO080_085-Datasheet.pdf (page 50) for Maximum sensor report rates by report type.
 
-## Calibration of the Sensor
+## Basic User Sensor Calibration Procedure - Dynamic Calibration
+
+It is recommended to calibrate the BNO08X. Each sensor is calibrated individually.
+The basic calibarationsteps are provided below if a user wants to force a calibration.
+the basic Sensor Calibration Procedure:
+- Accelerometer
+- - Move sensor into 4-6 unique orientations and held in each orientation for about 1 second.
+- - For planar calibration, rotated the sensor around it Z-axis by at least 180 degrees.
+- Gyroscope
+- - Set sensor down on a stationary surface for approximately 2-3 seconds.
+- Magnetometer
+- - Sensor should be rotated about 180° and back to the beginning position in each axis (roll, pitch, yaw). In roughly 2 seconds.
 
 Background:
+In the BNO08x datasheet see figure 3-2 summarizes the steps required to calibrate the accelerometer, gyroscope and magnetometer.
+Note that in normal use the device will be exposed to conditions that will allow calibration to
+occur with no explicit user input.
+For more details on the procedure to calibrate the BNO08X, refer to the BNO08X Sensor Calibration Procedure
+application note.
 - https://cdn.sparkfun.com/assets/9/e/1/d/9/Sensor-Calibration-Procedure-v1.1.pdf
 
 ## Raw Reports - Be Careful

@@ -1,13 +1,13 @@
 # test_calibration.py
 #
 # BNO08x Micropython I2C example program
-# Calibration of three main sensors
+# Calibration of three main sensors.
+# see README.md "Basic User Sensor Calibration Procedure" for recommened sensor movements
 
 from time import sleep
 
-from i2c import BNO08X_I2C
 from bno08x import *
-
+from i2c import BNO08X_I2C
 from machine import I2C, Pin
 from utime import ticks_ms, ticks_diff
 
@@ -45,15 +45,17 @@ while True:
     _, _, _, accel_accuracy, _ = bno.acceleration.full
     _, _, _, mag_accuracy, _ = bno.magnetic.full
     _, _, _, gyro_accuracy, _ = bno.gyro.full
-    
+
     # Check calibration of all timers
     if all(x >= 2 for x in (accel_accuracy, mag_accuracy, gyro_accuracy)):
         status = "All Good !"
         calibration_good = True
     else:
+        if start_good:
+            print("\nlost calibration, resetting timer\n")
         status = "low accuracy, move sensor"
         calibration_good = False
-        
+
     print(f"Accuracy: {accel_accuracy=}, {mag_accuracy=}, {gyro_accuracy=}\t{status}")
 
     if calibration_good:
@@ -64,10 +66,10 @@ while True:
             elapsed = ticks_diff(ticks_ms(), start_good) / 1000.0
             if elapsed >= GOOD_SECONDS:
                 print(f"\n*** Calibration stable for {GOOD_SECONDS} secs")
-                break  
+                break
     else:
         start_good = None
 
-#Exited loop
+# Exited loop
 bno.save_calibration_data()
 print("*** Calibration saved !")
