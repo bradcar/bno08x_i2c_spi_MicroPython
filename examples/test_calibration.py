@@ -1,9 +1,7 @@
 # test_calibration.py
 #
-# TODO: BRC save_calibration_data works for i2c, but not spi
-#
 # BNO08x Micropython I2C example program
-# Calibration of Magnetometer magnetic accuracy report
+# Calibration of three main sensors
 
 from time import sleep
 

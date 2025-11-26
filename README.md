@@ -130,9 +130,10 @@ The examples directory shows the use of the following sensor reports. Each of th
     stability_str = bno.stability_classification    # string of stability classification returned
     activity_str = bno.activity_classification      # string of activity classification returned
 
-The following functions can be used to tare and manually calibrate the sensor:
+The following  can be used to tare and manually calibrate the sensor:
 
-    bno.tare  # tare the sensor
+    bno.tare(0x07, BNO_REPORT_ROTATION_VECTOR)
+    bno.save_tare_data
 
     bno.begin_calibration 
     bno.calibration_status  # wait for sensor to be ready to calibrate

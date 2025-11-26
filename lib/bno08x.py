@@ -89,9 +89,15 @@ _COMMAND_REQUEST = const(0xF2)
 _COMMAND_RESPONSE = const(0xF1)
 
 # ME / DCD Calibration commands and sub-commands
-_ME_CALIBRATE = const(0x7)
+_ME_TARE_COMMAND = const(0x03)
+_ME_CALIBRATE_COMMAND = const(0x7)
+
+#ME/DCD Subcommads
 _ME_CAL_CONFIG = const(0x00)
 _ME_GET_CAL = const(0x01)
+_ME_TARE_NOW = const(0x00)
+_ME_PERSIST_TARE = const(0x01)
+_ME_TARE_SET_REORIENTATION = const(0x02)
 _SAVE_DCD = const(0x6)
 
 # Reports Summary depending on BNO device
@@ -289,6 +295,16 @@ _AVAIL_SENSOR_REPORTS = {
     BNO_REPORT_ARVR_STABILIZED_ROTATION_VECTOR: (_Q_POINT_14_SCALAR, 5, 14),  # For testing
     BNO_REPORT_ARVR_STABILIZED_GAME_ROTATION_VECTOR: (_Q_POINT_14_SCALAR, 4, 12),  # For testing
     BNO_REPORT_GYRO_INTEGRATED_ROTATION_VECTOR: (_Q_POINT_14_SCALAR, 4, 12),  # For testing
+}
+
+_TARE_BASIS_ENCODES = {
+    BNO_REPORT_ROTATION_VECTOR: 0,
+    BNO_REPORT_GAME_ROTATION_VECTOR: 1,
+    BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR: 2,
+    BNO_REPORT_GYRO_INTEGRATED_ROTATION_VECTOR: 3,
+    # The last two are unimplemented reports, included with correct placeholders
+    BNO_REPORT_ARVR_STABILIZED_ROTATION_VECTOR: 4,
+    BNO_REPORT_ARVR_STABILIZED_GAME_ROTATION_VECTOR: 5,
 }
 
 # C-style layout for standard BNO08x sensor reports 16-bit
@@ -904,15 +920,97 @@ class BNO08X:
 
         return roll, tilt, yaw
 
-    # ======== Motion Engine (ME) Calibration ========
+    # ======== Motion Engine (ME) Tare and Calibration (manual) ========
+   
+    def tare(self, axis=0x07, basis=None) -> int:
+        """
+        Tare the sensor
+        axis 0x07 (Z,Y,X). Re-orient all motion outputs (accel, gyro, mag, &rotation vectors)
+        axis 0x04 (Z-only). changes the heading, but not the tilt
+        
+        Rotation Vector or Geomagnetic Rotation Vector will reorient all motion outputs.
+        Gaming Rotation Vector will only tare the Gaming Rotation Vector.
+        """
+        # encode rotation vector to be tared
+        if basis in _TARE_BASIS_ENCODES:
+            encode = _TARE_BASIS_ENCODES[basis]
+        else:
+            raise ValueError(f"Unknown Tare Basis Report ID: {basis}")
+        
+        # ARVR rotation vectors currently unimplemented
+        if encode in (4, 5):
+            raise NotImplementedError("This ARVR Tare Basis is currently unimplemented.")
+        
+        self._dbg(f"TARE: using {hex(basis)=} on {axis=}, {encode=}...")        
+        self._send_me_command(_ME_TARE_COMMAND,
+            [
+                _ME_TARE_NOW,  # Perform Tare Now
+                axis,  # Perform All axis (7) by default
+                encode,  # rotation vector (quaternion) to be tared
+                0, 0, 0, 0, 0, 0,  # 6-11 Reserved
+            ]
+        )
+        return axis, encode
+    
+    @property
+    def clear_tare(self) -> boolean:
+        """
+        Clear the Tare data to flash
+        """
+        self._dbg(f"TARE: Clear Tare...")        
+        self._send_me_command(_ME_TARE_COMMAND,
+            [
+                _ME_TARE_SET_REORIENTATION,  # reorientate
+                0, 0, 0, 0, 0, 0, 0, 0,  # 1-8 Reserved
+            ]
+        )
+        return True
+    
+    def tare_reorientation(self, i, j, k, r) -> bool:
+        """
+        Send quaternion reorientation for tare.
+        Quaternion components are sent as 16-bit signed ints (Q14), LSB first.
+        """
+        # Convert floats to int16 using Q14 fixed-point
+        qi = int(i * (1 << 14))
+        qj = int(j * (1 << 14))
+        qk = int(k * (1 << 14))
+        qr = int(r * (1 << 14))
+
+        # Pack into 8 bytes, little-endian
+        payload = struct.pack("<hhhh", qi, qj, qk, qr)
+
+        self._dbg(f"TARE: q_int = {(qi, qj, qk, qr)}")
+        self._dbg(f"TARE: raw bytes = {[hex(b) for b in payload]}")
+        
+        params = [_ME_TARE_SET_REORIENTATION] + list(payload)
+        self._send_me_command(_ME_TARE_COMMAND, params)
+
+        return True
+    
+    @property
+    def save_tare_data(self) -> boolean:
+        """
+        Save the Tare data to flash
+        """
+        self._dbg(f"TARE Persist data to flash...")        
+        self._send_me_command(_ME_TARE_COMMAND,
+            [
+                _ME_PERSIST_TARE,  # Persist Tare
+                0, 0, 0, 0, 0, 0, 0, 0,  # 1-8 Reserved
+            ]
+        )
+        return True
+        
     @property
     def begin_calibration(self) -> int:
         """
+        Request manual calibration
         6.4.6.1 SH-2: Command Request sent by the host to configure the ME calibration
         of the accelerometer, gyro and magnetometer giving the host the ability to control
         when calibration is performed.
         """
-        self._send_me_command(
+        self._send_me_command(_ME_CALIBRATE_COMMAND,
             [
                 1,  # calibrate accel
                 1,  # calibrate gyro
@@ -929,16 +1027,18 @@ class BNO08X:
     @property
     def calibration_status(self) -> int:
         """
-        Wait till calibration read, Send request for status command, wait for response.
+        See if Request for manual calibration accepted
+        Wait till calibration ready, Send request for status command, wait for response.
         """
-        self._send_me_command([ 0, 0, 0, _ME_GET_CAL, 0, 0, 0, 0, 0,])
+        self._send_me_command(_ME_CALIBRATE_COMMAND, [ 0, 0, 0, _ME_GET_CAL, 0, 0, 0, 0, 0,])
         return self._calibration_started
 
-    def _send_me_command(self, me_command) -> None:
+    def _send_me_command(self, me_type, me_command) -> None:
+        self._dbg(f" ME Command {me_type}: {me_command=}")
         start_time = ticks_ms()
         local_buffer = self._command_buffer
         _insert_command_request_report(
-            _ME_CALIBRATE,
+            me_type,
             self._command_buffer,  
             self._get_report_seq_id(_COMMAND_REQUEST),
             me_command,
@@ -1203,7 +1303,7 @@ class BNO08X:
 
         cal_status, accel_en, gyro_en, mag_en, planar_en, table_en, *_reserved = response
 
-        if command == _ME_CALIBRATE and cal_status == 0:
+        if command == _ME_CALIBRATE_COMMAND and cal_status == 0:
             self._me_calibration_started_at = ticks_ms()
             self._calibration_started = True
             self._dbg("eady to start calibration at {ticks_ms()=}")
@@ -1268,7 +1368,7 @@ class BNO08X:
             # self._dbg(f"Report: {_REPORTS_DICTIONARY[report_id]}\nData: {sensor_data}, {accuracy=}, {delay_us=}")
 
             self._sensor_us = self.last_interrupt_us - self._last_base_timestamp_us + delay_us
-            # tpical irq is 1.4 ms to 1.67 ms with print
+            # use to optimize irq signals
             # print(f"sensor irq= {(self.last_interrupt_us - self.prev_interrupt_us) / 1000.0} ms")
 
             self._report_values[report_id] = sensor_data + (accuracy, self._sensor_us)
@@ -1344,7 +1444,7 @@ class BNO08X:
         raise NotImplementedError(f"Report Type ({report_id}) is not supported.")
 
 
-    # Enable a given feature of the BNO08x (See Hillcrest 6.5.4)
+    # Enable a given feature/sensor of the BNO08x (See Hillcrest 6.5.4)
     def enable_feature(self, feature_id, freq=None):
         """
         Enable sensor features for bno08x, set period in usec (not ms)
