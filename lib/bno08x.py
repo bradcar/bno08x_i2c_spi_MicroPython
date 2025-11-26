@@ -343,10 +343,10 @@ _INITIAL_REPORTS = {
     BNO_REPORT_GAME_ROTATION_VECTOR: (0.0, 0.0, 0.0, 0.0, 0, 0),
     BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR: (0.0, 0.0, 0.0, 0.0, 0, 0),
     # Gyro is a 5 tuple, Celsius float and int timestamp for last two entry
-    BNO_REPORT_RAW_GYROSCOPE: (0, 0, 0, 0.0, 0, 0, 0),
+    BNO_REPORT_RAW_GYROSCOPE: (0, 0, 0, 0.0, 0),
     # Acc & Mag are 4-tuple, int timestamp for last entry
-    BNO_REPORT_RAW_ACCELEROMETER: (0, 0, 0, 0, 0, 0),
-    BNO_REPORT_RAW_MAGNETOMETER: (0, 0, 0, 0, 0, 0),
+    BNO_REPORT_RAW_ACCELEROMETER: (0, 0, 0, 0),
+    BNO_REPORT_RAW_MAGNETOMETER: (0, 0, 0, 0),
     BNO_REPORT_ARVR_STABILIZED_ROTATION_VECTOR: (0.0, 0.0, 0.0, 0.0, 0.0, 0, 0),
     BNO_REPORT_ARVR_STABILIZED_GAME_ROTATION_VECTOR: (0.0, 0.0, 0.0, 0.0, 0, 0),
     BNO_REPORT_STEP_COUNTER: 0,
