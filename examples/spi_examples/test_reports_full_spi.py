@@ -1,9 +1,11 @@
-# test_reports_spi.py
+# test_reports_full_spi.py
 #
 # BNO08x MicroPython SPI Test
 #
 # SPI interface: Test common sensor reports:
-# acceleration, magnetic, gryoscope, quaternion, quaternion.euler
+# acceleration.full, magnetic.full, gryo.full, quaternion.full, quaternion.euler_full
+# full reports with accuracy and timestamps
+# notice: with slow report frequency, the report can be from last time at not at this time
 
 from time import sleep
 

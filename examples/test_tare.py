@@ -1,7 +1,7 @@
 # test_tare.py
 #
 # BNO08x Micropython I2C example program
-# measure quaternion, use euler_conversion, tare the sensor, and show inew orientation
+# measure quaternion, use euler_conversion, tare the sensor, and show new orientation
 
 from time import sleep
 

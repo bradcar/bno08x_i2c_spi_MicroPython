@@ -2,12 +2,11 @@
 #
 # BNO08x MicroPython SPI Test
 #
-# SPI interface: Test simple sensor report for acceleration
+# measure quaternion, use euler_conversion, tare the sensor, and show new orientation
 
 from time import sleep
 
 from bno08x import *
-
 from machine import SPI, Pin
 from spi import BNO08X_SPI
 
@@ -38,34 +37,34 @@ calibration_good = False
 status = ""
 
 # show values for 9 seconds 
-for t in range (1,9):
+for t in range(1, 9):
     quat_i, quat_j, quat_k, quat_real = bno.quaternion
     print(f"\nt={t}: Quaternion   I: {quat_i:+.3f}  J: {quat_j:+.3f}  K: {quat_k:+.3f}  Real: {quat_real:+.3f}")
     roll, pitch, yaw = bno.euler_conversion(quat_i, quat_j, quat_k, quat_real)
     print(f"     Euler Angle: Roll {roll:+.1f}°  Pitch: {pitch:+.1f}°  Yaw: {yaw:+.1f}°  degrees")
     sleep(1)
 
-print ("\n\n*** Starting Countdown timer for 5 seconds, then tare the sensor\n")
-for t in range (5, 0, -1):
+print("\n\n*** Starting Countdown timer for 5 seconds, then tare the sensor\n")
+for t in range(5, 0, -1):
     quat_i, quat_j, quat_k, quat_real = bno.quaternion
     print(f"\nt={t}: Quaternion   I: {quat_i:+.3f}  J: {quat_j:+.3f}  K: {quat_k:+.3f}  Real: {quat_real:+.3f}")
     roll, pitch, yaw = bno.euler_conversion(quat_i, quat_j, quat_k, quat_real)
     print(f"     Euler Angle: Roll {roll:+.1f}°  Pitch: {pitch:+.1f}°  Yaw: {yaw:+.1f}°  degrees")
     sleep(1)
 
-axis = 0x07  #tare all Axis (z, y, x)
+axis = 0x07  # tare all Axis (z, y, x)
 bno.tare(axis, BNO_REPORT_ROTATION_VECTOR)
 
-print (f"\n\n*** Tare the sensor ({hex(axis)}, {hex(BNO_REPORT_ROTATION_VECTOR)})\n")
+print(f"\n\n*** Tare the sensor ({hex(axis)}, {hex(BNO_REPORT_ROTATION_VECTOR)})\n")
 
 # show new tare values for 9 seconds 
-for t in range (1,9):
+for t in range(1, 9):
     quat_i, quat_j, quat_k, quat_real = bno.quaternion
     print(f"\nt={t}: Quaternion   I: {quat_i:+.3f}  J: {quat_j:+.3f}  K: {quat_k:+.3f}  Real: {quat_real:+.3f}")
     roll, pitch, yaw = bno.euler_conversion(quat_i, quat_j, quat_k, quat_real)
     print(f"     Euler Angle: Roll {roll:+.1f}°  Pitch: {pitch:+.1f}°  Yaw: {yaw:+.1f}°  degrees")
     sleep(1)
 
-#Exited loop
+# Exited loop
 bno.save_tare_data
 print("\n\n*** Tare saved to flash !")

@@ -2,12 +2,11 @@
 #
 # BNO08x MicroPython SPI Test
 #
-# SPI interface: Test simple sensor report for acceleration
+# Activity, stability, and steps
 
 from time import sleep
 
 from bno08x import *
-
 from machine import SPI, Pin
 from spi import BNO08X_SPI
 
@@ -31,7 +30,6 @@ bno.enable_feature(BNO_REPORT_STABILITY_CLASSIFIER)
 bno.enable_feature(BNO_REPORT_ACTIVITY_CLASSIFIER)
 bno.enable_feature(BNO_REPORT_SHAKE_DETECTOR)
 bno.enable_feature(BNO_REPORT_STEP_COUNTER)
-
 
 print("BNO08x reports enabled\n")
 bno.print_report_period()

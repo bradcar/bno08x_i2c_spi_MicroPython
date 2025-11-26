@@ -2,9 +2,10 @@
 #
 # BNO08x MicroPython SPI Test
 #
-# SPI interface: Test simple sensor report for acceleration
-
-from time import sleep
+# Raw device reports: raw_accelerometer, raw_magnetic, raw_gyro
+#  - raw_accelerometer, raw_magnetic -  return 3 values and time_stamp
+#  - raw_gyro - returnn 3 values, Celsius, and time_stamp
+# note: timestamp is not clearly described in Ceva documentation
 
 from bno08x import *
 

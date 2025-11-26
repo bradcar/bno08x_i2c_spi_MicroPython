@@ -2,12 +2,12 @@
 #
 # BNO08x MicroPython SPI Test
 #
-# SPI interface: Test simple sensor report for acceleration
+# Calibration of three main sensors.
+# see README.md "Basic User Sensor Calibration Procedure" for recommened sensor movements
 
 from time import sleep
 
 from bno08x import *
-
 from machine import SPI, Pin
 from spi import BNO08X_SPI
 
@@ -27,9 +27,9 @@ bno = BNO08X_SPI(spi, cs_pin, reset_pin, int_pin, wake_pin, debug=False)
 print(spi)  # Notice polarity=1, phase=1 for bno08x
 print("====================================\n")
 
-bno.enable_feature(BNO_REPORT_ACCELEROMETER, 10)
-bno.enable_feature(BNO_REPORT_MAGNETOMETER, 10)
-bno.enable_feature(BNO_REPORT_GYROSCOPE, 10)
+bno.enable_feature(BNO_REPORT_ACCELEROMETER, 5)
+bno.enable_feature(BNO_REPORT_MAGNETOMETER, 5)
+bno.enable_feature(BNO_REPORT_GYROSCOPE, 5)
 
 bno.print_report_period()
 print("\nBNO08x sensors enabled")
@@ -51,15 +51,17 @@ while True:
     _, _, _, accel_accuracy, _ = bno.acceleration.full
     _, _, _, mag_accuracy, _ = bno.magnetic.full
     _, _, _, gyro_accuracy, _ = bno.gyro.full
-    
+
     # Check calibration of all timers
     if all(x >= 2 for x in (accel_accuracy, mag_accuracy, gyro_accuracy)):
         status = "All Good !"
         calibration_good = True
     else:
+        if start_good:
+            print("\nlost calibration, resetting timer\n")
         status = "low accuracy, move sensor"
         calibration_good = False
-        
+
     print(f"Accuracy: {accel_accuracy=}, {mag_accuracy=}, {gyro_accuracy=}\t{status}")
 
     if calibration_good:
@@ -70,10 +72,10 @@ while True:
             elapsed = ticks_diff(ticks_ms(), start_good) / 1000.0
             if elapsed >= GOOD_SECONDS:
                 print(f"\n*** Calibration stable for {GOOD_SECONDS} secs")
-                break  
+                break
     else:
         start_good = None
 
-#Exited loop
+# Exited loop
 bno.save_calibration_data()
 print("*** Calibration saved !")
