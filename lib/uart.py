@@ -59,7 +59,7 @@ class BNO08X_UART(BNO08X):
         if not isinstance(int_pin, Pin):
             raise TypeError(f"int_pin must be a Pin object, not {type(int_pin)}")
         self._int = int_pin
-        self._int.init(Pin.IN, Pin.PULL_UP) # guarantee  int_pin is properly set up
+        self._int.init(Pin.IN, Pin.PULL_UP) # guarantee int_pin is properly set up
 
         if reset_pin is not None and not isinstance(reset_pin, Pin):
             raise TypeError(f"reset_pin (RST) must be a Pin object or None, not {type(reset_pin)}")
