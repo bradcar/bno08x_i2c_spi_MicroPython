@@ -14,7 +14,7 @@ This library has been tested with BNO086 sensor on Raspberry Pico 2 W.
 The report frequency will be limited by the interface chosen. 
 SPI is the fastest and SPI is 40% faster than I2C, but more importantly SPI avoids the bno08x's non-standard I2C clock stretching that the BNO08x sensors perform.
 I2C Clock Stretching causes IO errors in these cases.
-SPI is also ?x faster than UART. Choose the report rate and interface that meets your needs.
+SPI is also 5.3x faster than UART. Choose the report rate and interface that meets your needs.
 
 **Credits - thanks!**
 - 100% inspired by the original Adafruit CircuitPython I2C library for BNO08X, Copyright (c) 2020 Bryan Siepert for Adafruit Industries.
@@ -25,17 +25,14 @@ SPI is also ?x faster than UART. Choose the report rate and interface that meets
 
 ### I2C Setup
 
-    # import the library
+    from machine import I2C, Pin
     from i2c import BNO08X_I2C
     from bno08x import *
 
-    # set up the  I2C bus
     int_pin = Pin(14, Pin.IN, Pin.PULL_UP)  # BNO sensor (INT)
     reset_pin = Pin(15, Pin.OUT)  # BNO sensor (RST)
 
     i2c0 = I2C(0, scl=Pin(13), sda=Pin(12), freq=400_000)
-
-    # set up the BNO sensor on I2C
     bno = BNO08X_I2C(i2c0, address=0x4b, int_pin=int_pin, reset_pin=reset_pin)
 
 Required for I2C (see SPI and UART below):
@@ -192,7 +189,6 @@ On the Sparkfun BNO086 when using SPI, one must clear i2c jumper when using SPI 
 
     spi = SPI(0, sck=Pin(18), mosi=Pin(19), miso=Pin(16), baudrate=3_000_000)
     print(spi)
-
     bno = BNO08X_SPI(spi, cs_pin=cs_pin, int_pin=int_pin, reset_pin=reset_pin, wake_pin=wake_pin)
 
 Required for SPI:
@@ -205,18 +201,26 @@ Optional for SPI:
 - debug : prints very detailed logs, primarily for driver debug & development.
 
 ## UART Setup
+
+ UART must be set to baudrate=3_000_000 (only).
+
+    from machine import UART, Pin
+    from uart import BNO08X_UART
+    from bno08x import *
+    
+    int_pin = Pin(14, Pin.IN, Pin.PULL_UP)  # Interrupt, BNO (RST) signals when ready
+    reset_pin = Pin(15, Pin.OUT, value=1)  # Reset, tells BNO (INT) to reset
+
+    uart = UART(1, baudrate=3_000_000, tx=Pin(8), rx=Pin(9), timeout=500)
+    bno = BNO08X_UART(uart, reset_pin=reset_pin, int_pin=int_pin, debug=False)
+
 UART wires are in some sense opposite of i2c wires (double-check your wiring).
 uart = UART(1, baudrate=3_000_000, tx=Pin(8), rx=Pin(9), timeout=2000)
 uart = UART(0, baudrate=3_000_000, tx=Pin(12), rx=Pin(13), timeout=2000)
 
 Required for UART:
 - int_pin : required by UART for accurate sensor timestamps. Define a Pin object, not number.
-Optional for UART:
 - reset_pin : used by UART for hardware reset, if not defined uses soft reset. It is a Pin object, not number
-
-1. BNO08x SDA to board UARTx-RX (uart 1 ex: gpio9, uart 0 ex: gpio13)
-2. BNO08x SCL to board UARTx-TX (uart 1 ex: gbio8, uart 0 ex: gpio12)
-3. todo ? INT Pin is required for accurate communication
 
 PS0 and PS1 are the host interface protocol selection pins, therefore UART can not use a wake pin.  In order to use UART, PS1 must be high (solder blob) and PS0/WAKE not have solder blob so it is tied to ground.
 
@@ -264,14 +268,16 @@ The actual sensor period will vary from the attempted period returned by this fu
     print(f"Accelerometer: {period_ms:.1f} ms, {1_000 / period_ms:.1f} Hz")
 
 Currently On Pico 2 W, the SPI interface can almost service 2ms reports. 
-The fastest updates we've seen on SPI is 3.1 ms (322Hz), I2C is slower at 3.8ms (263Hz). When one requests report frequencies at faster than the microcontroler can service, the period the reporting frequency will slow.
+The fastest updates we've seen on SPI is 3.0 ms (333Hz), I2C is slower at 3.8ms (263Hz). When one requests report frequencies at faster than the microcontroler can service, the period the reporting frequency will slow.
 Try you own experiments and let me know what you find.
 
 Refer to the BNO080_085-Datasheet.pdf (page 50) for Maximum sensor report rates by report type.
 
 ## Calibration of the Sensor
 
-background: https://www.youtube.com/watch?v=0rlvvYgmTvI&t=28s
+Background:
+- https://www.youtube.com/watch?v=yPfQK75dZbU
+- https://www.youtube.com/watch?v=0rlvvYgmTvI&t=28s
 
 ## Raw Reports - Be Careful
     BNO_REPORT_RAW_ACCELEROMETER
