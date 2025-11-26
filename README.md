@@ -200,7 +200,9 @@ Required for SPI:
 Optional for SPI:
 - debug : prints very detailed logs, primarily for driver debug & development.
 
-## UART Setup
+## UART Setup -- TODO  UART IN DEBUG !!! TODO  UART IN DEBUG !!! TODO  UART IN DEBUG !!!
+WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING
+WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING
 
  UART must be set to baudrate=3_000_000 (only).
 
