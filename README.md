@@ -170,11 +170,11 @@ Some have had good results with software I2C (emulation). We do not know how thi
 
 ## SPI Setup - for higher speed sensor reports (no clock-stretch issues)
 
-In order to use SPI on most sensor boards one must add ONE solder blob on PS1. 
-On the back side of Sparkfun BNO086 and Adafruit BNO085, one needs a solder blob to bridge PS1 which will set PS1 high for SPI operation. 
+In order to use SPI on most sensor boards you must add ONE solder blob on PS1. 
+On the back side of Sparkfun BNO086 and Adafruit BNO085, you need a solder blob to bridge PS1 which will set PS1 high for SPI operation. 
 The PS0 (Wake_pin) must be connected to a gpio (wake_pin), please be careful not put a solder blog on PS0.
 This driver uses the wake-pin after reset as a ‘wake’ signal taking the BNO08X out of sleep for communication with the BNO08X.
-On the Sparkfun BNO086 when using SPI, one must clear i2c jumper when using SPI or UART (https://docs.sparkfun.com/SparkFun_VR_IMU_Breakout_BNO086_QWIIC/assets/board_files/SparkFun_VR_IMU_Breakout_BNO086_QWIIC_Schematic_v10.pdf)
+On the Sparkfun BNO086 when using SPI, you must clear i2c jumper when using SPI or UART (https://docs.sparkfun.com/SparkFun_VR_IMU_Breakout_BNO086_QWIIC/assets/board_files/SparkFun_VR_IMU_Breakout_BNO086_QWIIC_Schematic_v10.pdf)
 
  SPI must be set to baudrate=3_000_000 (only).
 
@@ -214,7 +214,7 @@ Optional for SPI:
     uart = UART(1, baudrate=3_000_000, tx=Pin(8), rx=Pin(9), timeout=500)
     bno = BNO08X_UART(uart, reset_pin=reset_pin, int_pin=int_pin, debug=False)
 
-UART wires are in some sense opposite of i2c wires (double-check your wiring).
+UART wires are, in some sense, opposite of i2c wires (double-check your wiring).
 uart = UART(1, baudrate=3_000_000, tx=Pin(8), rx=Pin(9), timeout=2000)
 uart = UART(0, baudrate=3_000_000, tx=Pin(12), rx=Pin(13), timeout=2000)
 
@@ -268,7 +268,7 @@ The actual sensor period will vary from the attempted period returned by this fu
     print(f"Accelerometer: {period_ms:.1f} ms, {1_000 / period_ms:.1f} Hz")
 
 Currently On Pico 2 W, the SPI interface can almost service 2ms reports. 
-The fastest updates we've seen on SPI is 3.0 ms (333Hz), I2C is slower at 3.8ms (263Hz). When one requests report frequencies at faster than the microcontroler can service, the period the reporting frequency will slow.
+The fastest updates we've seen on SPI is 3.0 ms (333Hz), I2C is slower at 3.8ms (263Hz). When you request report frequencies at faster than the microcontroler can service, the period the reporting frequency will slow.
 Try you own experiments and let me know what you find.
 
 Refer to the BNO080_085-Datasheet.pdf (page 50) for Maximum sensor report rates by report type.
@@ -276,8 +276,7 @@ Refer to the BNO080_085-Datasheet.pdf (page 50) for Maximum sensor report rates 
 ## Calibration of the Sensor
 
 Background:
-- https://www.youtube.com/watch?v=yPfQK75dZbU
-- https://www.youtube.com/watch?v=0rlvvYgmTvI&t=28s
+- https://cdn.sparkfun.com/assets/9/e/1/d/9/Sensor-Calibration-Procedure-v1.1.pdf
 
 ## Raw Reports - Be Careful
     BNO_REPORT_RAW_ACCELEROMETER
@@ -306,6 +305,5 @@ The CEVA BNO085 and BNO086 9-axis sensors are made by Ceva (https://www.ceva-ip.
 - https://www.ceva-ip.com/wp-content/uploads/BNO080_085-Datasheet.pdf
 - https://cdn.sparkfun.com/assets/4/d/9/3/8/SH-2-Reference-Manual-v1.2.pdf
 - https://cdn.sparkfun.com/assets/7/6/9/3/c/Sensor-Hub-Transport-Protocol-v1.7.pdf
-- https://cdn.sparkfun.com/assets/9/e/1/d/9/Sensor-Calibration-Procedure-v1.1.pdf
 
 Bosch has a new 6-axis IMU BHI385 (announced June 2025) that can be paired with BMM350 3-axis Geomagnetic sensor.
