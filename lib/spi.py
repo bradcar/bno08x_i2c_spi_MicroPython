@@ -32,7 +32,6 @@ from utime import ticks_ms, ticks_diff, sleep_ms, sleep_us
 
 from bno08x import BNO08X, Packet, PacketError, DATA_BUFFER_SIZE
 
-
 _HEADER_STRUCT = {
     "packet_bytes": (uctypes.UINT16 | 0),
     "channel": (uctypes.UINT8 | 2),
