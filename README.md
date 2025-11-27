@@ -16,10 +16,10 @@ SPI is the fastest and SPI is 40% faster than I2C, but more importantly SPI avoi
 I2C Clock Stretching causes IO errors in these cases.
 SPI is also 5.3x faster than UART. Choose the report rate and interface that meets your needs.
 
-**Credits - Many thanks! I'm standing on the shoulders of giants **
-- 100% inspired by the original Adafruit CircuitPython I2C library for BNO08X. THANKS, THANKS!! Copyright (c) 2020 Bryan Siepert for Adafruit Industries. ([GitHub link](https://github.com/adafruit/Adafruit_CircuitPython_BNO08x))
+**Credits - Many thanks! **
+- 100% inspired by the original Adafruit CircuitPython I2C library for BNO08X. THANKS! Copyright (c) 2020 Bryan Siepert for Adafruit Industries. ([GitHub link](https://github.com/adafruit/Adafruit_CircuitPython_BNO08x))
 - This code was also inspired by feature and fixes written by dobodu ([GitHub link](https://github.com/dobodu/BOSCH-BNO085-I2C-micropython-library))
-- thanks in advance for any pull request contributions.
+- ...thanks in advance for any pull request contributions.
 
 ## Setting up to use the Sensor
 
