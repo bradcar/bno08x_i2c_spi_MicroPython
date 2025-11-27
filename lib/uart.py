@@ -213,17 +213,6 @@ class BNO08X_UART(BNO08X):
 
         return new_packet
 
-    @property
-    def _data_ready(self):
-        """
-        UART variant also has uart.any() fallback
-        """
-        if self._data_available:
-            return True
-        
-#         self._dbg(f"_data_ready: {self._uart.any()}")
-#         return self._uart.any() >= 4
-
     def _soft_reset(self):
         """
         UART has its own Soft reset,

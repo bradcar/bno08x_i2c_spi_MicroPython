@@ -159,12 +159,3 @@ class BNO08X_I2C(BNO08X):
         # self._dbg(f"New Packet: {new_packet}")
         return new_packet
 
-    # I2C _data_ready logic. resets _data_available flag for next int event
-    @property
-    def _data_ready(self):
-        if self._int.value() == 0:
-            self._data_available = True
-
-        ready = self._data_available
-        self._data_available = False
-        return ready

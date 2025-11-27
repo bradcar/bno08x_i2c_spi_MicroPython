@@ -49,7 +49,7 @@ FUTURE: explore adding simple 180 degree calibration(0x0c), page 55 SH-2
 FUTURE: include estimated ange in full quaternion implementation, maybe make new modifier bno.quaternion.est ?
 FUTURE: process ARVR rotation and
 """
-__version__ = "0.7"
+__version__ = "0.8"
 __repo__ = "https://github.com/bradcar/bno08x_i2c_spi_MicroPython"
 
 from math import asin, atan2, degrees
@@ -147,6 +147,7 @@ BNO_REPORT_HEART_RATE_MONITOR = const(0x23)
 BNO_REPORT_ARVR_STABILIZED_ROTATION_VECTOR = const(0x28)
 BNO_REPORT_ARVR_STABILIZED_GAME_ROTATION_VECTOR = const(0x29)
 BNO_REPORT_GYRO_INTEGRATED_ROTATION_VECTOR = const(0x2A)
+BNO_REPORT_MOTION_REQUEST = const(0x2B)
 
 _REPORTS_DICTIONARY = {
     0x01: "ACCELEROMETER",
@@ -171,21 +172,25 @@ _REPORTS_DICTIONARY = {
     0x14: "RAW_ACCELEROMETER",
     0x15: "RAW_GYROSCOPE",
     0x16: "RAW_MAGNETOMETER",
-    0x17: "SAR",
+    0x17: "SAR - reserved",
     0x18: "STEP_DETECTOR",
     0x19: "SHAKE_DETECTOR",
     0x1A: "FLIP_DETECTOR",
     0x1B: "PICKUP_DETECTOR",
     0x1C: "STABILITY_DETECTOR",
+    0x1D: "0X1D unknown",
     0x1E: "ACTIVITY_CLASSIFIER",
     0x1F: "SLEEP_DETECTOR",
     0x20: "TILT_DETECTOR",
     0x21: "POCKET_DETECTOR",
     0x22: "CIRCLE_DETECTOR",
-    0x23: "HR MONITOR",
+    0x23: "HEART_RATE_MONITOR",
     0x28: "ARVR_STABILIZED_ROTATION_VECTOR",
     0x29: "ARVR_STABILIZED_GAME_ROTATION_VECTOR",
-    0x2A: "GYRO INTEGRATED ROTATION VECTOR",
+    0x2A: "GYRO INTEGRATED_ROTATION_VECTOR",
+    0x2B: "MOTION_REQUEST",
+    0x2C: "OPTICAL_FLOW",
+    0x2D: "DEAD_RECKONING",
     0xF1: "COMMAND_RESPONSE",
     0xF2: "COMMAND_REQUEST",
     0xF3: "FRS_READ_RESPONSE",
@@ -277,31 +282,47 @@ _RESET_CAUSE_STRING = [
 
 # sensor reports (scalar, #results (without .full), bytes in sensor report packet
 _AVAIL_SENSOR_REPORTS = {
-    BNO_REPORT_ACCELEROMETER: (_Q_POINT_8_SCALAR, 3, 10),
-    BNO_REPORT_GYROSCOPE: (_Q_POINT_9_SCALAR, 3, 10),
-    BNO_REPORT_MAGNETOMETER: (_Q_POINT_4_SCALAR, 3, 10),
-    BNO_REPORT_LINEAR_ACCELERATION: (_Q_POINT_8_SCALAR, 3, 10),
-    BNO_REPORT_ROTATION_VECTOR: (_Q_POINT_14_SCALAR, 4, 14),
-    BNO_REPORT_GRAVITY: (_Q_POINT_8_SCALAR, 3, 10),
-    BNO_REPORT_GAME_ROTATION_VECTOR: (_Q_POINT_14_SCALAR, 4, 12),
-    BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR: (_Q_POINT_12_SCALAR, 4, 14),
-    BNO_REPORT_PRESSURE: (1, 1, 8),
-    BNO_REPORT_AMBIENT_LIGHT: (1, 1, 8),
-    BNO_REPORT_HUMIDITY: (1, 1, 6),
-    BNO_REPORT_PROXIMITY: (1, 1, 6),
-    BNO_REPORT_TEMPERATURE: (1, 1, 6),
-    BNO_REPORT_STEP_COUNTER: (1, 1, 12),
-    BNO_REPORT_SHAKE_DETECTOR: (1, 1, 6),
-    BNO_REPORT_STABILITY_CLASSIFIER: (1, 1, 6),
-    BNO_REPORT_ACTIVITY_CLASSIFIER: (1, 1, 16),
-    BNO_REPORT_RAW_ACCELEROMETER: (1, 3, 16),
-    BNO_REPORT_RAW_GYROSCOPE: (1, 3, 16),
-    BNO_REPORT_RAW_MAGNETOMETER: (1, 3, 16),
-    BNO_REPORT_UNCALIBRATED_GYROSCOPE: (_Q_POINT_9_SCALAR, 3, 10),  # For testing
-    BNO_REPORT_UNCALIBRATED_MAGNETOMETER: (_Q_POINT_4_SCALAR, 3, 10),  # For testing
-    BNO_REPORT_ARVR_STABILIZED_ROTATION_VECTOR: (_Q_POINT_14_SCALAR, 5, 14),  # For testing
-    BNO_REPORT_ARVR_STABILIZED_GAME_ROTATION_VECTOR: (_Q_POINT_14_SCALAR, 4, 12),  # For testing
-    BNO_REPORT_GYRO_INTEGRATED_ROTATION_VECTOR: (_Q_POINT_14_SCALAR, 4, 12),  # For testing
+    BNO_REPORT_ACCELEROMETER: (_Q_POINT_8_SCALAR, 3, 10),  #0x01
+    BNO_REPORT_GYROSCOPE: (_Q_POINT_9_SCALAR, 3, 10),  #0x02
+    BNO_REPORT_MAGNETOMETER: (_Q_POINT_4_SCALAR, 3, 10),  #0x03
+    BNO_REPORT_LINEAR_ACCELERATION: (_Q_POINT_8_SCALAR, 3, 10),  #0x04
+    BNO_REPORT_ROTATION_VECTOR: (_Q_POINT_14_SCALAR, 4, 14),  #0x05
+    BNO_REPORT_GRAVITY: (_Q_POINT_8_SCALAR, 3, 10),  #0x06
+    BNO_REPORT_UNCALIBRATED_GYROSCOPE: (_Q_POINT_9_SCALAR, 3, 16),  # For testing #07
+    BNO_REPORT_GAME_ROTATION_VECTOR: (_Q_POINT_14_SCALAR, 4, 12),  #0x08
+    BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR: (_Q_POINT_12_SCALAR, 4, 14), #0x09
+    BNO_REPORT_PRESSURE: (1, 1, 8),  #0x0a
+    BNO_REPORT_AMBIENT_LIGHT: (1, 1, 8),  #0x0b
+    BNO_REPORT_HUMIDITY: (1, 1, 6), #0x0c
+    BNO_REPORT_PROXIMITY: (1, 1, 6), #0x0d
+    BNO_REPORT_TEMPERATURE: (1, 1, 6), #0x0e
+    BNO_REPORT_UNCALIBRATED_MAGNETOMETER: (_Q_POINT_4_SCALAR, 3, 16),  # For testing,  # 0x0f
+    BNO_REPORT_TAP_DETECTOR: (1, 1, 5), # 0x10
+    BNO_REPORT_STEP_COUNTER: (1, 1, 12), #0x11
+    BNO_REPORT_SIGNIFICANT_MOTION: (1, 1, 6), # 0x12
+    BNO_REPORT_STABILITY_CLASSIFIER: (1, 1, 6),  #0x13
+    BNO_REPORT_RAW_ACCELEROMETER: (1, 3, 16), #0x14
+    BNO_REPORT_RAW_GYROSCOPE: (1, 3, 16),  #0x15
+    BNO_REPORT_RAW_MAGNETOMETER: (1, 3, 16),  #0x16
+    # BNO_REPORT_SAR reserved  # 0x17
+    BNO_REPORT_STEP_DETECTOR: (1, 1, 8),  # 0x18
+    BNO_REPORT_SHAKE_DETECTOR: (1, 1, 6),  # 0x19
+    BNO_REPORT_FLIP_DETECTOR: (1, 1, 6),  # 0x1a
+    BNO_REPORT_PICKUP_DETECTOR: (1, 1, 6),  # 0x1b
+    BNO_REPORT_STABILITY_DETECTOR: (1, 1, 6),    # 0x1c
+    # 0x1d ???
+    BNO_REPORT_ACTIVITY_CLASSIFIER: (1, 1, 16),  # 0x1e
+    BNO_REPORT_SLEEP_DETECTOR: (1, 1, 6),   # 0x1f
+    BNO_REPORT_TILT_DETECTOR: (1, 1, 6),   # 0x20
+    BNO_REPORT_POCKET_DETECTOR: (1, 1, 6),  # 0x21)
+    BNO_REPORT_CIRCLE_DETECTOR: (1, 1, 6),  #0x22)
+    BNO_REPORT_HEART_RATE_MONITOR: (1, 1, 6),  #0x23
+    BNO_REPORT_ARVR_STABILIZED_ROTATION_VECTOR: (_Q_POINT_14_SCALAR, 5, 14),  # 0x28, note est acc QPoint 12 ?
+    BNO_REPORT_ARVR_STABILIZED_GAME_ROTATION_VECTOR: (_Q_POINT_14_SCALAR, 4, 12),  # 0x29
+    BNO_REPORT_GYRO_INTEGRATED_ROTATION_VECTOR: (_Q_POINT_14_SCALAR, 4, 14),  # #2a
+    BNO_REPORT_MOTION_REQUEST: (1, 1, 6),  # Motion Request send to host periodically? 0x2b
+    0x2c: (1 ,1, 24), # optical flow 0x2c
+    0x2d: (1 ,1, 60), # dead reckoning pose 0x2d
 }
 
 _TARE_BASIS_ENCODES = {
@@ -647,6 +668,7 @@ class BNO08X:
         self._calibration_started = False
         self._wait_for_initialize = True
         self._data_available = False
+        self._in_handle = False
         self._id_read = False
         self._reset_mismatch = False  # if reset_pin set make sure hardware reset done, else pin bad
         # dictionary of most recent values from each enabled sensor report
@@ -944,7 +966,7 @@ class BNO08X:
 
         # FUTURE: ARVR rotation vectors currently unimplemented
         if encode in (4, 5):
-            raise NotImplementedError("This ARVR Tare Basis is currently unimplemented.")
+            raise NotImplementedError("The ARVR Tare Basis is currently unimplemented.")
 
         self._dbg(f"TARE: using {hex(basis)=} on {axis=}, {encode=}...")
         self._send_me_command(_ME_TARE_COMMAND,
@@ -1204,6 +1226,10 @@ class BNO08X:
         Split a single packet into multiple reports and process them in FIFO order.
         Handles multiple 0xF8 Product ID Response reports correctly.
         """
+        if self._in_handle:
+            return
+
+        self._in_handle = True
         data_view = memoryview(packet.data)
 
         try:
@@ -1215,7 +1241,14 @@ class BNO08X:
 
                 # Look up required byte count
                 if report_id < 0xF0:
-                    required_bytes = _AVAIL_SENSOR_REPORTS[report_id][2]
+                    try:
+                        required_bytes = _AVAIL_SENSOR_REPORTS[report_id][2]
+                    except:
+                        # TODO re-do this after debug, don't like skipping below
+                        self._dbg(f"INVALID REPORT ID in_handle_packet {report_id} {hex(report_id)=}")
+                        self._dbg(f"INVALID REPORT ID {next_byte_index=}, next 6 bytes follows:")
+                        debug_view = data_view[next_byte_index: next_byte_index + 6]
+                        self._dbg(f"{debug_view=}")
                 else:
                     required_bytes = _REPORT_LENGTHS.get(report_id, 0)
                     if required_bytes == 0:
@@ -1242,6 +1275,9 @@ class BNO08X:
         except Exception as error:
             self._dbg(f"Handle Packet: Packet bytes:{[hex(b) for b in packet.data[:4]]}...")
             raise
+        
+        finally:
+            self._in_handle = False
 
     def _handle_control_report(self, report_id: int, report_bytes: bytearray) -> None:
         """
@@ -1439,9 +1475,11 @@ class BNO08X:
 
         if 0x28 <= report_id <= 0x29:
             # FUTURE: add two ARVR reports (4-tuple and 5-Tuple)
-            raise NotImplementedError(f"ARVR Reports ({report_id}) is not supported yet.")
+            raise NotImplementedError(f"ARVR Reports ({hex(report_id)=}) not supported yet.")
 
-        raise NotImplementedError(f"Report Type ({report_id}) is not supported.")
+        # All other reports skipped, noted with self._dbg
+        self._dbg(f"_process_report: ({hex(report_id)}) not supported.")
+        self._dbg(f"report: {report_bytes}")
 
     # Enable a given feature/sensor of the BNO08x (See Hillcrest 6.5.4)
     def enable_feature(self, feature_id, freq=None):
@@ -1646,13 +1684,11 @@ class BNO08X:
         if self._debug:
             print("DBG::\t\t", *args, **kwargs)
 
-    # TODO add to I2C and UART
     @property
     def _data_ready(self):
-        """
-        Returns True if at least one new interrupt seen based on timestamps
-        """
-        if self.last_interrupt_us != self.prev_interrupt_us:
+        """ Returns True if at least one new interrupt seen """
+        if self._data_available:
+            self._data_available = False
             return True
         return False
 
