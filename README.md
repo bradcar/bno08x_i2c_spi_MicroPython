@@ -4,6 +4,8 @@
 bno08x MicroPython driver for I2C, SPI, UART on MicroPython. This is for the BNO086, BNO085, and BNO080 IMU sensors. The BNO08x sensors have a variety of sensors that can provide data/results.
 Each of these are accessed individually and called reports.
 
+### NOTE: redesigning sensor timestamp  from timestamp_us (int) to timestamp_ms(float) with a new timebase done by 30-Nov !
+
 This driver is written to provide to respond to high-frequency reports (short period), and also provides 0.1 msec resolution 
 timestamps with each sensor report. Knowing IMU results together with timestamp of results is critical for many
 telemetry applications.  
