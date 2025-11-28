@@ -45,13 +45,13 @@ TODO: Fix timestamp synchronication with host
 TODO: apply spi optimizations to uart ?  fix UART mis-framing (with quaternions?)
 TODO: test UART with Reset & Interrupt pins
 
-Possible future projects, some have partial coding already in place
-FUTURE: explore adding simple 180 degree calibration(0x0c), page 55 SH-2
-FUTURE: include estimated ange in full quaternion implementation, maybe make new modifier bno.quaternion.est ?
-FUTURE: process ARVR rotation and
+Possible future projects:
+FUTURE: explore adding simple 180 degree calibration(0x0c), page 55 SH-2, but will need move request reports
+FUTURE: include estimated ange in full quaternion implementation, maybe make new modifier bno.quaternion.est_angle
+FUTURE: process two ARVR reports (rotation vector has estimaged angle which needs diff Q-point for that value)
 """
 
-__version__ = "0.8.1"
+__version__ = "0.8.2"
 __repo__ = "https://github.com/bradcar/bno08x_i2c_spi_MicroPython"
 
 from math import asin, atan2, degrees
@@ -594,7 +594,7 @@ class SensorReading4:
 class SensorReading5:
     """
     5-tuple reading with optional metadata and optional full.
-    TODO: process ARVR rotation and full quaternion implementation wth estimated angle
+    FUTURE: process ARVR rotation and full quaternion implementation wth estimated angle
     """
     __slots__ = ("v1", "v2", "v3", "v4", "e1", "accuracy", "timestamp_us")
 
@@ -673,7 +673,7 @@ class BNO08X:
         self._wait_for_initialize = True
         self._data_available = False
         self._in_handle = False
-        self._id_read = False
+        self._product_id_received = False
         self._reset_mismatch = False  # if reset_pin set make sure hardware reset done, else pin bad
         # dictionary of most recent sensor values, only ifenabled
         self._report_values = {}
@@ -692,7 +692,7 @@ class BNO08X:
     def _on_interrupt(self, pin):
         """
         Interrupt handler for active-low H_INTN (int_pin).
-        Captures the exact host timestamp (microseconds).
+        Captures the exact host timestamp (usec = microseconds).
         """
         self.prev_interrupt_us = self.last_interrupt_us
         self.last_interrupt_us = ticks_us()
@@ -722,7 +722,7 @@ class BNO08X:
 
             sleep_ms(600)  # is this excessive?
 
-        raise RuntimeError(f"Failed to get valid Report ID (0xf8) with {reset_type} reset")
+        raise RuntimeError(f"Failed to get valid Product ID Response (0xf8) with {reset_type} reset")
 
     ############ USER VISIBLE REPORT FUNCTIONS ###########################
 
@@ -1293,7 +1293,7 @@ class BNO08X:
 
     def _handle_control_report(self, report_id: int, report_bytes: bytearray) -> None:
         """
-        Handle control reports. Timestamp is first to return quickly
+        Handle control reports. Handle time-critical Timestamp methods first
         :param report_id: report ID
         :param report_bytes: portion of packet for report
         :return:
@@ -1331,17 +1331,17 @@ class BNO08X:
             sw_build_number = unpack_from("<I", report_bytes, 8)[0]
             sw_patch = unpack_from("<H", report_bytes, 12)[0]
             self._dbg("Product ID Response (0xf8):")
-            self._dbg(f"*** Last reset cause: {reset_cause} = {_RESET_CAUSE_STRING[reset_cause]}")
+            self._dbg(f"*** Last Reset Cause: {reset_cause} = {_RESET_CAUSE_STRING[reset_cause]}")
             self._dbg(f"*** Part Number: {sw_part_number}")
             self._dbg(f"*** Software Version: {sw_major}.{sw_minor}.{sw_patch}")
             self._dbg(f"\tBuild: {sw_build_number}\n")
 
-            # only first Product ID Response has reset cause, if reset_pin make sure hardware performed
-            if reset_cause != 0:
-                if self._reset_pin is not None:
-                    if reset_cause != 4:  # 4 = expected hardware-reset via reset pin
-                        self._reset_mismatch = True
-            self._id_read = True
+            # only first Product ID Response has reset cause, reset_pin should reset_cause=4
+            if not self._product_id_received:
+                if reset_cause != 4: 
+                    self._reset_mismatch = True
+                    self._dbg(f"Expected 4 for Reset Cause with reset_pin, got {reset_cause}")
+            self._product_id_received = True
             return
 
     def _handle_command_response(self, report_bytes: bytearray) -> None:
@@ -1354,9 +1354,9 @@ class BNO08X:
         if command == _ME_CALIBRATE_COMMAND and cal_status == 0:
             self._me_calibration_started_at = ticks_ms()
             self._calibration_started = True
-            self._dbg("eady to start calibration at {ticks_ms()=}")
+            self._dbg("Ready to start calibration at {ticks_ms()=}")
 
-        if command == _SAVE_DCD_COMMAND:
+        elif command == _SAVE_DCD_COMMAND:
             self._dbg(f"DCD Save calibration sucess. Status is {cal_status}")
             if cal_status == _COMMAND_STATUS_SUCCESS:
                 self._dcd_saved_at = ticks_ms()
@@ -1374,20 +1374,16 @@ class BNO08X:
         """
         # handle typical sensor reports first
         if 0x01 <= report_id <= 0x09:
-            # uctypes-based parser for BNO08x sensor reports, sensor data starts at offset=4
-            # Parses 3-tuple vectors, 4-tuple quaternions, and 5-tuple ARVR rotation.
+            # uctypes-based sensor reports, Parses 3-tuple, 4-tuple, and 5-tuple
             s = uctypes.struct(uctypes.addressof(report_bytes), _SENSOR_REPORT_LAYOUT, uctypes.LITTLE_ENDIAN)
             scalar, count, _ = _AVAIL_SENSOR_REPORTS[report_id]
 
-            # Extract accuracy from byte2 low bits
+            # Extract accuracy from byte2 low bits, Extract delay from byte2 & byte3(14 bits)
             accuracy = s.byte2 & 0x03
-
-            # Extract delay (14 bits)
-            delay_upper = (s.byte2 >> 2) & 0x3F
-            delay_raw = (delay_upper << 8) | s.byte3
+            delay_raw = ((s.byte2 & 0xFC) << 6) | s.byte3
             delay_us = delay_raw * 100
 
-            # scale sensor data using uctypes INT16, likely e1 needs a different scalar Q-point
+            # scale sensor data by Q-point scalar, likely e1 needs a different Q-point scalar
             if count == 3:
                 sensor_data = (
                     s.v1 * scalar,
@@ -1423,11 +1419,12 @@ class BNO08X:
             self._unread_report_count[report_id] += 1
             return
 
-        #  **** Handle all control reports  ****
+        #  **** Handle all control reports, here because some are time-critical
         if report_id >= 0xF0:
             self._handle_control_report(report_id, report_bytes)
             return
 
+        # back to handling user reports
         if report_id == BNO_REPORT_STEP_COUNTER:
             self._report_values[report_id] = unpack_from("<H", report_bytes, 8)[0]
             return
@@ -1450,8 +1447,6 @@ class BNO08X:
 
         # Activitity Classifier in SH-2 (6.5.36)
         if report_id == BNO_REPORT_ACTIVITY_CLASSIFIER:
-            # 0 Report ID = 0x1E, # 1 Sequence number, # 2 Status, 3 Delay, 4 Page Number + EOS
-            # 5 Most likely state, # 6-15 Classification (10 x Page Number) + confidence
             end_and_page_number, most_likely = unpack_from("<BB", report_bytes, 4)
             page_number = end_and_page_number & 0x7F
             confidences = unpack_from("<BBBBBBBBB", report_bytes, 6)
@@ -1463,7 +1458,7 @@ class BNO08X:
             self._report_values[BNO_REPORT_ACTIVITY_CLASSIFIER] = activity_classification
             return
 
-        # RRaw accelerometerj and aw Magnetometer: returns 4-tuple: x, y, z, and time_stamp
+        # Raw accelerometer and Raw Magnetometer: returns 4-tuple: x, y, z, and time_stamp
         # time_stamp units in microseconds
         if report_id in (BNO_REPORT_RAW_ACCELEROMETER, BNO_REPORT_RAW_MAGNETOMETER):
             x, y, z = unpack_from("<HHH", report_bytes, 4)
@@ -1493,7 +1488,7 @@ class BNO08X:
         print(f"report: {report_bytes}")
         raise NotImplementedError(f"Un-implemented Report ({hex(report_id)=}) not supported yet.")
 
-    # Enable a given feature/sensor of the BNO08x (See Hillcrest 6.5.4)
+    # Enable given feature/sensor report on BNO08x (See SH2 6.5.4)
     def enable_feature(self, feature_id, freq=None):
         """
         Enable sensor features for bno08x, set period in usec (not ms)
@@ -1591,12 +1586,9 @@ class BNO08X:
         return  # Procedure to be completed and corrected
 
     def _check_id(self):
-        """
-        Ensure the BNO08X product ID is read.
-        Handles multiple 0xF8 responses in a single packet.
-        """
+        """ Ensure the BNO08X product ID is read. Handles multiple 0xF8 responses in a packet. """
         self._dbg("********** Check ID **********")
-        if getattr(self, "_id_read", False):
+        if getattr(self, "_product_id_received", False):
             return True
 
         # Send Product ID request
@@ -1613,8 +1605,8 @@ class BNO08X:
                 # Handle all reports in the packet
                 self._handle_packet(packet)
 
-                # Check if any 0xF8 was processed
-                if getattr(self, "_id_read", False):
+                # Check if any 0xF8 was processed, only the first shows
+                if getattr(self, "_product_id_received", False):
                     return True
             except RuntimeError:
                 pass
