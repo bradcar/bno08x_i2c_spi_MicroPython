@@ -51,7 +51,7 @@ FUTURE: include estimated ange in full quaternion implementation, maybe make new
 FUTURE: process ARVR rotation and
 """
 
-__version__ = "0.8"
+__version__ = "0.8.1"
 __repo__ = "https://github.com/bradcar/bno08x_i2c_spi_MicroPython"
 
 from math import asin, atan2, degrees
@@ -1249,7 +1249,19 @@ class BNO08X:
 
                 # Look up required byte count
                 if report_id < 0xF0:
-                    required_bytes = _AVAIL_SENSOR_REPORTS[report_id][2]
+                    try:
+                        required_bytes = _AVAIL_SENSOR_REPORTS[report_id][2]
+                    except:
+                        # TODO re-do this after debug, don't like skipping below
+                        self._dbg(f"INVALID REPORT ID in_handle_packet {report_id} {hex(report_id)=}")
+                        self._dbg(f"INVALID REPORT ID {next_byte_index=}, next 6 bytes follows:")
+                        debug_view = data_view[next_byte_index: next_byte_index + 6]
+                        self._dbg(f"{debug_view=}")
+                        print(f"INVALID REPORT ID in_handle_packet {report_id} {hex(report_id)=}")
+                        print(f"INVALID REPORT ID {next_byte_index=}, next 6 bytes follows:")
+                        debug_view = data_view[next_byte_index: next_byte_index + 6]
+                        print(f"{debug_view=}")
+                        raise NotImplementedError(f"Un-implemented Report ({hex(report_id)=}) not supported yet.")
                 else:
                     required_bytes = _REPORT_LENGTHS.get(report_id, 0)
                     if required_bytes == 0:
@@ -1687,17 +1699,7 @@ class BNO08X:
     @property
     def _data_ready(self):
         """ Returns True if at least one new interrupt seen """
-        if self.last_interrupt_us != self.prev_interrupt_us:
-            return True
-        return False
-#     
-#     @property     
-#     def _data_ready(self):
-#         """ Returns True if at least one new interrupt seen """
-#         if self._data_available:
-#             self._data_available = False
-#             return True
-#         return False
+        return self.last_interrupt_us != self.prev_interrupt_us
 
 
 # must define alias after BNO08X class, so class SensorReading4 class can use this
