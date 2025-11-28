@@ -66,8 +66,7 @@ class BNO08X_I2C(BNO08X):
         self._reset = reset_pin
         
         try:
-            self._i2c.readfrom(self._bno_i2c_addr, 1) # test if i2c devide
-
+            self._i2c.readfrom(self._bno_i2c_addr, 1) # test if i2c device present
         except OSError as e:
             if e.errno in (errno.ENODEV, errno.EIO, OSError):
                 raise RuntimeError(
@@ -75,7 +74,7 @@ class BNO08X_I2C(BNO08X):
                 ) from e
             raise
     
-        # give the parent constructor (BNO08X.__init__), the right values from BNO08X_I2C
+        # I2C can not use cs_Pin or wake_pin
         super().__init__(_interface, reset_pin=reset_pin, int_pin=int_pin, cs_pin=None, wake_pin=None, debug=debug)
 
     def _wait_for_int(self):
@@ -150,10 +149,6 @@ class BNO08X_I2C(BNO08X):
         if packet_bytes < 4:
             raise PacketError(f" _read_packet Invalid packet length: {packet_bytes}")
 
-        channel = header_view.channel
-        sequence = header_view.sequence
-        self._rx_sequence_number[channel] = sequence
-
         mv = memoryview(self._data_buffer)[:packet_bytes]
         
         try:
@@ -164,7 +159,9 @@ class BNO08X_I2C(BNO08X):
             raise
 
         new_packet = Packet(self._data_buffer[:packet_bytes])
-        self._update_sequence_number(new_packet)
+        channel = new_packet.header.channel_number
+        seq = new_packet.header.sequence_number
+        self._rx_sequence_number[channel] = seq
         # self._dbg commented out in time critical code
         # self._dbg(f"New Packet: {new_packet}")
         return new_packet

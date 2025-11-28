@@ -91,7 +91,7 @@ class BNO08X_SPI(BNO08X):
         finally:
             self._cs.value(1)
         if resp == b'\xFF\xFF\xFF\xFF': # real BNO08X will not return 0xFFFFFFFF on all bytes
-            raise RuntimeError("No SPI device detected")
+            raise RuntimeError("No SPI device detected on CS pin")
 
         super().__init__(_interface, reset_pin=reset_pin, int_pin=int_pin, cs_pin=cs_pin, wake_pin=wake_pin,
                          debug=debug)
@@ -113,8 +113,7 @@ class BNO08X_SPI(BNO08X):
             return
 
         while ticks_diff(ticks_ms(), start_time) < 3000:  # 3.0sec
-            if self._data_available:
-                self._data_available = False  # Clear the flag for the next event
+            if self.last_interrupt_us != self.prev_interrupt_us:
                 return
             sleep_us(10)  # 10 us give 5.4ms loop 1ms give 5.4ms loop
         raise RuntimeError("Timeout (3.0s) waiting for INT flag to be set")
@@ -161,11 +160,6 @@ class BNO08X_SPI(BNO08X):
         packet_bytes = header_view.packet_bytes
         if packet_bytes & 0x8000:
             halfpacket = True
-        channel = header_view.channel
-        sequence = header_view.sequence
-
-        self._rx_sequence_number[channel] = sequence
-        # self._dbg(f"channel {channel} has {packet_bytes - 4} bytes available")
 
         if packet_bytes > DATA_BUFFER_SIZE:
             # If the packet is too big, reallocate the buffer. This is normal.
@@ -181,7 +175,9 @@ class BNO08X_SPI(BNO08X):
             raise PacketError("read partial packet")
 
         new_packet = Packet(self._data_buffer)
-        self._update_sequence_number(new_packet)
+        channel = new_packet.header.channel_number
+        seq = new_packet.header.sequence_number
+        self._rx_sequence_number[channel] = seq
         return new_packet
 
     def _send_packet(self, channel, data):

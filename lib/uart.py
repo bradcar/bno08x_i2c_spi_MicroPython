@@ -65,7 +65,9 @@ class BNO08X_UART(BNO08X):
             raise TypeError(f"reset_pin (RST) must be a Pin object or None, not {type(reset_pin)}")
         self._reset = reset_pin
 
-        # wake_pin must be NONE!  wake_pin/PS0 = 0 (gnd)
+        # TODO add check for UART functioning at some level
+
+        # UART can not use cs_pin or wake_pin
         super().__init__(_interface, reset_pin=reset_pin, int_pin=int_pin, cs_pin=None, wake_pin=None, debug=debug)
 
     def _send_packet(self, channel, data):
@@ -185,10 +187,7 @@ class BNO08X_UART(BNO08X):
         self._read_header()
         header = Packet.header_from_buffer(self._data_buffer)
         packet_byte_count = header.packet_byte_count
-        channel = header.channel_number
-        sequence_number = header.sequence_number
 
-        self._rx_sequence_number[channel] = sequence_number
         if packet_byte_count == 0:
             raise PacketError("No packet available")
 
@@ -209,8 +208,9 @@ class BNO08X_UART(BNO08X):
 
         new_packet = Packet(self._data_buffer)
         self._dbg(f"{new_packet=}")
-        self._update_sequence_number(new_packet)
-
+        channel = new_packet.header.channel_number
+        seq = new_packet.header.sequence_number
+        self._rx_sequence_number[channel] = seq
         return new_packet
 
     def _soft_reset(self):

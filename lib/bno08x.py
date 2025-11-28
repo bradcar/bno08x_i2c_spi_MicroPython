@@ -663,8 +663,7 @@ class BNO08X:
         self._dcd_saved_at: float = -1
         self._me_calibration_started_at: float = -1.0
         self._calibration_started = False
-        self._wait_for_initialize = True
-        self._data_available = False
+        # self._wait_for_initialize = True
         self._in_handle = False
         self._product_id_received = False
         self._reset_mismatch = False  # if reset_pin set make sure hardware reset done, else pin bad
@@ -689,7 +688,6 @@ class BNO08X:
         """
         self.prev_interrupt_us = self.last_interrupt_us
         self.last_interrupt_us = ticks_us()
-        self._data_available = True
 
     def reset_sensor(self):
         if self._reset_pin:
@@ -832,10 +830,7 @@ class BNO08X:
 
     @property
     def raw_gyro(self):
-        """
-        raw gyroscope unscaled/uncalibrated from raw registers
-        Notice: this is the only sensor that report temperature in Celsius
-        """
+        """ raw gyroscope unscaled/uncalibrated from raw registers, only sensor that reports Celsius """
         self._process_available_packets()
         try:
             self._unread_report_count[BNO_REPORT_RAW_GYROSCOPE] = 0
@@ -847,7 +842,7 @@ class BNO08X:
 
     @property
     def raw_magnetic(self):
-        """raw magnetic unscaled/uncalibrated from raw registers"""
+        """ raw magnetic unscaled/uncalibrated from raw registers"""
         self._process_available_packets()
         try:
             self._unread_report_count[BNO_REPORT_RAW_MAGNETOMETER] = 0
@@ -860,7 +855,7 @@ class BNO08X:
     # Other Sensor Reports
     @property
     def steps(self):
-        """The number of steps detected since the sensor was initialized"""
+        """ The number of steps detected since the sensor was initialized"""
         self._process_available_packets()
         try:
             self._unread_report_count[BNO_REPORT_STEP_COUNTER] = 0
@@ -870,7 +865,7 @@ class BNO08X:
 
     @property
     def shake(self):
-        """True if a shake was detected on any axis since the last time it was checked
+        """ True if a shake was detected on any axis since the last time it was checked
         State is "latched" once a shake is detected, it stays in "shaken" state until the value is read.
         This prevents missing shake events, but it is not guaranteed to reflect current shake state.
         """
@@ -890,8 +885,7 @@ class BNO08X:
         * "Unknown" - The sensor is unable to classify the current stability
         * "On Table" - The sensor is at rest on a stable surface with very little vibration
         * "Stationary" -  The sensor’s motion is below the stable threshold but\
-        the stable duration requirement has not been met. This output is only available when\
-        gyro calibration is enabled
+           - the stable duration requirement has not been met. only available if gyro calibration is enabled
         * "Stable" - The sensor’s motion has met the stable threshold and duration requirements.
         * "In motion" - The sensor is moving.
         """
@@ -930,11 +924,6 @@ class BNO08X:
         """
         Converts quaternion values to Euler angles to degrees.
         This uses the common aerospace/robotics convention (XYZ rotation order: roll-pitch-yaw).
-        :param i: quaternion component value
-        :param j: quaternion component value
-        :param k: quaternion component value
-        :param r: quaternion component value
-        :return: roll, pitch, yaw component values in degrees
         """
         jsqr = j * j
         t0 = 2.0 * (r * i + j * k)
@@ -1008,13 +997,10 @@ class BNO08X:
 
         # Pack into 8 bytes, little-endian
         payload = pack("<hhhh", qi, qj, qk, qr)
-
         self._dbg(f"TARE: q_int = {(qi, qj, qk, qr)}")
         self._dbg(f"TARE: raw bytes = {[hex(b) for b in payload]}")
-
         params = [_ME_TARE_SET_REORIENTATION] + list(payload)
         self._send_me_command(_ME_TARE_COMMAND, params)
-
         return True
 
     @property
@@ -1055,7 +1041,7 @@ class BNO08X:
     def calibration_status(self) -> int:
         """
         Check if Request for manual calibration accepted by sensor
-        Wait till calibration ready, Send request for status command, wait for response.
+        Wait until calibration ready, Send request for status command, wait for response.
         """
         self._send_me_command(_ME_CALIBRATE_COMMAND, [0, 0, 0, _ME_GET_CAL, 0, 0, 0, 0, 0, ])
         return self._calibration_started
@@ -1080,7 +1066,7 @@ class BNO08X:
                 break
 
     def save_calibration_data(self) -> None:
-        """Save the self-calibration data uwing DCD save command"""
+        """ Save the self-calibration data uwing DCD save command"""
         start_time = ticks_ms()
         local_buffer = bytearray(12)
         _insert_command_request_report(
@@ -1183,16 +1169,13 @@ class BNO08X:
             # return the full packet or None/raise an exception if no packet is ready
             try:
                 packet = self._read_packet(wait=False)
-
                 if packet is not None:
                     self._handle_packet(packet)
 
                     if channel == packet.header.channel_number and (report_id is None or report_id == packet.report_id):
                         return packet
-
             except PacketError:
                 pass
-
             sleep_ms(1)
 
         raise RuntimeError(
