@@ -159,6 +159,10 @@ class BNO08X_SPI(BNO08X):
         mv = memoryview(self._data_buffer)
         header_view = uctypes.struct(uctypes.addressof(mv[:4]), _HEADER_STRUCT, uctypes.LITTLE_ENDIAN)
         packet_bytes = header_view.packet_bytes
+        channel = header_view.channel
+        seq = header_view.sequence
+        self._rx_sequence_number[channel] = seq # SH2 Sequence number
+        
         if packet_bytes & 0x8000:
             halfpacket = True
 
@@ -176,9 +180,12 @@ class BNO08X_SPI(BNO08X):
             raise PacketError("read partial packet")
 
         new_packet = Packet(self._data_buffer)
-        channel = new_packet.header.channel_number
         seq = new_packet.header.sequence_number
-        self._rx_sequence_number[channel] = seq
+        self._rx_sequence_number[channel] = seq  # report sequence number
+        
+        # self._dbg commented out in time critical code
+        self._dbg(f"Received Packet: {new_packet}")
+        
         return new_packet
 
     def _send_packet(self, channel, data):
