@@ -627,11 +627,18 @@ class SensorReading5:
 
 
 class BNO08X:
-    """Library for the BNO08x IMUs from Hillcrest Laboratories
-        Main flow:
-        * _process_available_packets
-        * _handle_packet
-        * _process_report
+    """Library for the BNO08x IMUs from Ceva - Hillcrest Laboratories
+        Main flow of Sensor read:
+        1. user calls bno.acceleration - reads sensor data/metadata from _report_values[report_id]
+        2. _process_available_packets() - a packet can have multiple reports (0xfb, 0x01, 0x01)
+        3. _handle_packet() - splits packets into multiple reports, FIFO new overwrites old
+        4. _process_report()
+            a. processes sensor reports directly
+                i. sensor results & metadata (accuracy & timestamp) put into _report_values[report_id]
+                ii. update count in _unread_report_count[report_id] += 1
+            b. _handle_control_report - timestamps and vatious command responses/reports
+
+        Note: timestamp is ms(millisec) since 1st interrupt, while not sensor start, it is 1st we see bno
     """
 
     def __init__(self, _interface, reset_pin=None, int_pin=None, cs_pin=None, wake_pin=None, debug=False) -> None:
@@ -684,10 +691,9 @@ class BNO08X:
 
     def _on_interrupt(self, pin):
         """
-        Interrupt handler for active-low H_INTN (int_pin). Captures the exact host timestamp (usec = microseconds).
-        At first interrrupt
-         * self._sensor_epoch_ms starts at 0.0 ms at first interrupt.
-         * self._epoch_start_ms was the host ticks ms at first interrupt.
+        Interrupt handler for active-low int_pin (H_INTN). At first interrupt captures host & bno time
+         * self._sensor_epoch_ms set to 0.0 ms at first interrupt
+         * self._epoch_start_ms set to ticks_ms() at first interrupt
         """
         if self.last_interrupt_ms == -1:
             self._epoch_start_ms = ticks_ms()  # self._sensor_epoch_ms = 0.0  set in __init__
@@ -696,6 +702,7 @@ class BNO08X:
         self._data_available = True
 
     def reset_sensor(self):
+        """ driver requires hard reset, soft here for future, Reset tx and rx sequence numbers, on reset """
         if self._reset_pin:
             self._hard_reset()
             reset_type = "Hard"
@@ -703,12 +710,12 @@ class BNO08X:
             self._soft_reset()
             reset_type = "Soft"
 
-        for attempt in range(3):
+        # todo remove loop, check_id has 3.0 sec timeout --- if doesn't happen in 3sec won't happen
+        for attempt in range(1):
             try:
                 if self._check_id() and not self._reset_mismatch:
                     self._dbg(f"*** {reset_type} reset successful, acknowledged with 0xF8 response")
                     sleep_ms(100)  # allow SHTP time to settle
-                    # Reset tx and rx sequence numbers, after each reset
                     self._tx_sequence_number = [0, 0, 0, 0, 0, 0]
                     self._rx_sequence_number = [0, 0, 0, 0, 0, 0]
                     return
@@ -717,7 +724,7 @@ class BNO08X:
             except OSError as e:
                 self._dbg(f"Attempt {attempt + 1} failed with OSError: {e}")
 
-            sleep_ms(600)  # is this excessive?
+            # sleep_ms(600)  # is this excessive?
 
         raise RuntimeError(f"Failed to get valid Product ID Response (0xf8) with {reset_type} reset")
 
@@ -1091,37 +1098,6 @@ class BNO08X:
                 return
         raise RuntimeError("Could not save calibration data")
 
-    # FUTURE: ARVR Unimplemented (need to add to processing to reports before ARVR reports can be used)
-    # @property
-    # def arvr_stablized_rotation(self):
-    #     """
-    #     The ARVR-stabilized rotation vector sensor reports the orientation of the device. Accumulated errprs
-    #     are corrected while the device is in motion, which limits discontinuities or jumps in data.
-    #     The format of the rotation vector is a unit quaternion plus accuracy estimate (5-tuple).
-    #     """
-    #     self._process_available_packets()
-    #     try:
-    #         self._unread_report_count[BNO_REPORT_ARVR_STABILIZED_ROTATION_VECTOR] = 0
-    #         i, j, k, r, ae. acc, ts = self._report_values[BNO_REPORT_ARVR_STABILIZED_ROTATION_VECTOR]
-    #         return SensorReading5(i, j, k, r, ae, acc, ts)
-    #     except KeyError:
-    #         raise RuntimeError("arvr stabilized rotation report not enabled, use enable_feature") from None
-    #
-    # @property
-    # def arvr_stablized_game_rotation(self):
-    #     """
-    #     The ARVR-stabilized game rotation vector sensor reports the orientation of the device. Accumulated errprs
-    #     are corrected while the device is in motion, which limits discontinuities or jumps in data.
-    #     The format of the rotation vector is a unit quaternion.
-    #     """
-    #     self._process_available_packets()
-    #     try:
-    #         self._unread_report_count[BNO_REPORT_ARVR_STABILIZED_GAME_ROTATION_VECTOR] = 0
-    #         i, j, k, r. acc, ts = self._report_values[BNO_REPORT_ARVR_STABILIZED_GAME_ROTATION_VECTOR]
-    #         return SensorReading4(i, j, k, r, ae, acc, ts)
-    #     except KeyError:
-    #         raise RuntimeError("arvr stabilized game rotation report not enabled, use enable_feature") from None
-
     ############### private/helper methods ###############
 
     def _process_available_packets(self, max_packets: int = 10) -> bool:
@@ -1189,11 +1165,6 @@ class BNO08X:
 
         raise RuntimeError(
             f"Timed out waiting for packet on channel {channel} with ReportID {report_id} after {timeout}s")
-
-    def _update_sequence_number(self, new_packet: Packet) -> None:
-        channel = new_packet.channel_number
-        seq = new_packet.header.sequence_number
-        self._rx_sequence_number[channel] = seq
 
     def _handle_packet(self, packet):
         """
@@ -1277,7 +1248,7 @@ class BNO08X:
             self._dbg(f"Timestamp Rebase (0xfa): {self._last_base_timestamp_us} usec")
             return
 
-        # Feature response (0xfc)
+        # Feature response (0xfc) - This report issued when feature is enabled
         if report_id == _GET_FEATURE_RESPONSE:
             _report_id, feature_report_id = unpack_from("<BB", report_bytes)
             self._report_values[feature_report_id] = _INITIAL_REPORTS.get(feature_report_id, (0.0, 0.0, 0.0, 0, 0.0))
@@ -1475,25 +1446,28 @@ class BNO08X:
         set_feature_report = bytearray(17)
         set_feature_report[0] = _SET_FEATURE_COMMAND
         set_feature_report[1] = feature_id
-
+        
         if freq is None:
-            requested_interval = int(1_000_000 / DEFAULT_REPORT_FREQ[feature_id])
-        elif freq == 0:
-            requested_interval = 0
-        else:
+            freq = DEFAULT_REPORT_FREQ[feature_id]
+            
+        if freq != 0:
             requested_interval = int(1_000_000 / freq)
-
+        else:
+            requested_interval = 0 # effectively turns of reports? but feature still enabled
+            
         pack_into("<I", set_feature_report, 5, requested_interval)
         if feature_id == BNO_REPORT_ACTIVITY_CLASSIFIER:
             pack_into("<I", set_feature_report, 13, _ENABLED_ACTIVITIES)
 
         feature_dependency = _RAW_REPORTS.get(feature_id, None)
         if feature_dependency and feature_dependency not in self._report_values:
-            self._dbg(f" Feature dependency: {feature_dependency}")
-            self.enable_feature(feature_dependency, DEFAULT_REPORT_FREQ[feature_dependency])
+            self._dbg(f" Feature dependency detected, now also enable...")
+            self._dbg(f"{_REPORTS_DICTIONARY[feature_dependency]} {hex(feature_dependency)}")
+            self.enable_feature(feature_dependency, freq)
 
         self._wake_signal()
         self._send_packet(_BNO_CHANNEL_CONTROL, set_feature_report)
+        sleep_ms(20) # feature dependency must be enabled before raw, give it time
 
         try:
             report_bytes = self._wait_for_packet(_BNO_CHANNEL_CONTROL, _GET_FEATURE_RESPONSE,
