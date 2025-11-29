@@ -27,26 +27,39 @@ _HEADER_STRUCT = {
 }
 
 
+def _is_i2c(obj) -> bool:
+    """ Check that i2c object has required interfaces """
+    return (
+        hasattr(obj, "readfrom") and
+        hasattr(obj, "writeto") and
+        hasattr(obj, "readfrom_mem") and
+        hasattr(obj, "writeto_mem")
+    )
+
+
 class BNO08X_I2C(BNO08X):
     """Library for the BNO08x IMUs on I2C
 
     Args:
-        reset_pin: optionl reset to BNO08x
+        reset_pin: required to hard reset BNO08x, only reliable way to boot
         int_pin: required int_pin that signals BNO08x
         address: I2C address of sensor, which can often be changed with solder blobs on sensor boards
-        debug: prints very detailed logs, primarily for driver debug & development.
+        debug: prints very detailed logs, primarily for driver debug & development
     """
 
     def __init__(self, i2c_bus, address=_BNO08X_DEFAULT_ADDRESS, reset_pin=None, int_pin=None, debug=False):
+        if not _is_i2c(i2c_bus):
+            raise TypeError("i2c_bus must be an I2C-like object with needed interfaces") 
+        
         self._i2c = i2c_bus
         self._debug = debug
         _interface = "I2C"
 
         # Validate the i2c address
         if address == _BNO08X_DEFAULT_ADDRESS:
-            self._dbg("Using default I2C address.")
+            self._dbg(f"Using default I2C address ({hex(address)})")
         elif address == _BNO08X_BACKUP_ADDRESS:
-            self._dbg("Using backup I2C address.")
+            self._dbg(f"Using backup I2C address ({hex(address)})")
         else:
             raise ValueError(
                 f"Invalid I2C address {hex(address)}, "
@@ -64,17 +77,8 @@ class BNO08X_I2C(BNO08X):
         if reset_pin is not None and not isinstance(reset_pin, Pin):
             raise TypeError(f"Reset (RST) pin must be a Pin object or None, not {type(reset_pin)}")
         self._reset = reset_pin
-        
-#         try:
-#             self._i2c.readfrom(self._bno_i2c_addr, 1) # test if i2c device present
-#         except OSError as e:
-#             if e.errno in (errno.ENODEV, errno.EIO, OSError):
-#                 raise RuntimeError(
-#                     f"No I2C device found at address {hex(self._bno_i2c_addr)}"
-#                 ) from e
-#             raise
     
-        # I2C can not use cs_Pin or wake_pin
+        # I2C can not use cs_pin or wake_pin
         super().__init__(_interface, reset_pin=reset_pin, int_pin=int_pin, cs_pin=None, wake_pin=None, debug=debug)
 
     def _wait_for_int(self):
@@ -105,65 +109,44 @@ class BNO08X_I2C(BNO08X):
 
         if self._debug:
             packet = Packet(self._data_buffer)
-            self._dbg("Sending packet:")
-            self._dbg(packet)
+            self._dbg("")
+            self._dbg(f"Sending packet: {packet}")
 
         mv = memoryview(self._data_buffer)
         self._i2c.writeto(self._bno_i2c_addr, mv[:write_length])
 
         self._tx_sequence_number[channel] = (seq + 1) & 0xFF
-        return self._tx_sequence_number[channel]
-
+        return self._tx_sequence_number[channel] 
+ 
     def _read_packet(self, wait=None):
-        
-        # Treat wait=None or False as non-blocking
-        wait = bool(wait)
+        wait = bool(wait) #  both wait=None wait=False are non-blocking
         if wait:
             self._wait_for_int()
 
-        header_read_attempt = 0
-        while header_read_attempt < 2:
-            header_read_attempt += 1
-            header_mv = memoryview(self._data_buffer)[:4]
-
-            try:
-                self._i2c.readfrom_into(self._bno_i2c_addr, header_mv)
-            except OSError as e:
-                if e.args[0] == 110:  # ETIMEDOUT
-                    if not wait:
-                        return None 
-                # Catch rare I2C read failures that are not timeouts.
-                raise
-            
-            header_view = uctypes.struct(uctypes.addressof(self._data_buffer), _HEADER_STRUCT, uctypes.LITTLE_ENDIAN)
-            packet_bytes = header_view.packet_bytes
-            
-            if packet_bytes > len(self._data_buffer):
-                self._data_buffer = bytearray(packet_bytes)
-                continue
-            break
-
+        header_mv = memoryview(self._data_buffer)[:4]
+        self._i2c.readfrom_into(self._bno_i2c_addr, header_mv)
+        
+        header_view = uctypes.struct(uctypes.addressof(self._data_buffer), _HEADER_STRUCT, uctypes.LITTLE_ENDIAN)
+        packet_bytes = header_view.packet_bytes
+        channel = header_view.channel
+        seq = header_view.sequence
+        self._rx_sequence_number[channel] = seq # SH2 Sequence number
+        
+        if packet_bytes > len(self._data_buffer):
+            self._data_buffer = bytearray(packet_bytes)
         if packet_bytes == 0:
             return None     
-        
-        if packet_bytes < 4:
-            raise PacketError(f" _read_packet Invalid packet length: {packet_bytes}")
 
         mv = memoryview(self._data_buffer)[:packet_bytes]
-        
-        try:
-            self._i2c.readfrom_into(self._bno_i2c_addr, mv)
-        except OSError as e:
-            if e.args[0] == 110: # ETIMEDOUT
-                return None
-            raise
+        self._i2c.readfrom_into(self._bno_i2c_addr, mv)
 
         new_packet = Packet(self._data_buffer[:packet_bytes])
-        channel = new_packet.header.channel_number
         seq = new_packet.header.sequence_number
-        self._rx_sequence_number[channel] = seq
+        self._rx_sequence_number[channel] = seq # report sequence number
+        
         # self._dbg commented out in time critical code
-        # self._dbg(f"New Packet: {new_packet}")
+        self._dbg(f"Received Packet: {new_packet}")
+        
         return new_packet
 
     # I2C _data_ready logic. resets _data_available flag for next int event
