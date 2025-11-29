@@ -1111,7 +1111,7 @@ class BNO08X:
         while self._data_ready and processed_count < max_packets:
 
             if ticks_diff(ticks_ms(), start_time) > 1:
-                # commented out self._dbg in time critical loops
+                # * commented out self._dbg in time critical loops for normal operation
                 # self._dbg("1 ms Timeout in _process_available_packets")
                 # self._dbg(f"* {processed_count=}")
                 break
@@ -1128,12 +1128,12 @@ class BNO08X:
 
             self._handle_packet(new_packet)
             processed_count += 1
-            # commented out self._dbg in time critical loops
+            # * commented out self._dbg in time critical loops for normal operation
             # self._dbg(f"Processed {processed_count} packet{'s' if processed_count > 1 else ''}")
             # self._dbg(f"{new_packet=}")
 
         flag = processed_count > 0
-        # commented out self._dbg in time critical loops
+        # * commented out self._dbg in time critical loops for normal operation
         # self._dbg(f"_process_available_packets done, {processed_count} packets processed - {flag}")
         return flag
 
@@ -1147,13 +1147,13 @@ class BNO08X:
                 sleep_ms(1)
                 continue
 
+            # Continue to read & ignore packets until we find selected response
             if packet is not None:
                 if (packet.header.channel_number == channel and
                     (report_id is None or report_id == packet.report_id)):
-                    # NOW we handle it because it's the expected response
                     self._handle_packet(packet)
                     return packet
-                # Otherwise ignore and read another packet
+                
             sleep_ms(1)
 
         raise RuntimeError(
@@ -1181,6 +1181,7 @@ class BNO08X:
 
                 # Look up required byte count for each Report type, only enabled ones defined, others commented out
                 if report_id <= 0x2d:  # highest in SH-2 reference, many unimplemented
+                    # TODO: consider removing try
                     try:
                         required_bytes = _AVAIL_SENSOR_REPORTS[report_id][2]
                     except:
@@ -1206,15 +1207,13 @@ class BNO08X:
                     self._dbg(f"Unprocessable batch ERROR: skipping ! {unprocessed_byte_count} bytes")
                     break
 
-                # Zero-copy slice
                 report_view = data_view[next_byte_index: next_byte_index + required_bytes]
 
-                # Process immediately (instead of building slices list)
                 self._process_report(report_id, report_view)
                 report_count += 1
                 next_byte_index += required_bytes
 
-            # commented out self._dbg in time critical loops
+            # * commented out self._dbg in time critical loops
             # self._dbg(f"HANDLING {report_count} PACKET{'S' if report_count > 1 else ''}...")
 
         except Exception as error:
