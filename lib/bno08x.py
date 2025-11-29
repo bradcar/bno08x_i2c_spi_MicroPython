@@ -47,7 +47,8 @@ Cuurrent sensor update periods:
 - i2c:   3.8ms (263 Hz)
 - uart: 16.0ms ( 62 Hz)
 
-TODO: Fix timestamp synchronication with host
+TODO: fix not all reports getting updated, first is clearing flag?
+TODO: descide on call functions, wait for new data, or return what have
 TODO: apply spi optimizations to uart ?  fix UART mis-framing (with quaternions?)
 TODO: test UART with Reset & Interrupt pins
 
@@ -418,12 +419,9 @@ class PacketError(Exception):
 
 
 # Elapsed seconds, pass in tick_ms
-def _elapsed_sec(start_time):
-    """
-    Elapsed time between now - start_time.  You pass in start_time = ticks_ms()
-    Returns float in seconds
-    """
-    return ticks_diff(ticks_ms(), start_time) / 1000.0
+def _elapsed_sec(ticks_start):
+    """ Elapsed time between now - ticks_start. Returns float in seconds """
+    return ticks_diff(ticks_ms(), ticks_start) / 1000.0
 
 
 ############ COMMAND PARSING ###########################
@@ -448,7 +446,7 @@ def _insert_command_request_report(
 
 
 class Packet:
-    """ A class representing a Hillcrest Laboratory Sensor Hub Transport packet (all 4-byte headers) """
+    """ A class representing a Sensor Hub Transport Packet (4-byte headers) """
 
     def __init__(self, packet_bytes: bytearray) -> None:
         self.header = self.header_from_buffer(packet_bytes)
@@ -630,15 +628,10 @@ class SensorReading5:
 
 class BNO08X:
     """Library for the BNO08x IMUs from Hillcrest Laboratories
-
         Main flow:
         * _process_available_packets
         * _handle_packet
         * _process_report
-        * _parse_sensor_report_data
-
-    :param
-
     """
 
     def __init__(self, _interface, reset_pin=None, int_pin=None, cs_pin=None, wake_pin=None, debug=False) -> None:
@@ -664,8 +657,7 @@ class BNO08X:
         self._sensor_epoch_ms = 0.0
         self._last_base_timestamp_us = 0
 
-        # track sequence numbers one per channel, one per direction
-        # RX(inbound, last seen/expected) and TX(outbound) sequence numbers
+        # track RX(inbound) and TX(outbound) sequence numbers one per channel, one per direction
         self._rx_sequence_number: list[int] = [0, 0, 0, 0, 0, 0]
         self._tx_sequence_number: list[int] = [0, 0, 0, 0, 0, 0]
 
@@ -692,8 +684,7 @@ class BNO08X:
 
     def _on_interrupt(self, pin):
         """
-        Interrupt handler for active-low H_INTN (int_pin).
-        Captures the exact host timestamp (usec = microseconds).
+        Interrupt handler for active-low H_INTN (int_pin). Captures the exact host timestamp (usec = microseconds).
         At first interrrupt
          * self._sensor_epoch_ms starts at 0.0 ms at first interrupt.
          * self._epoch_start_ms was the host ticks ms at first interrupt.
@@ -818,7 +809,7 @@ class BNO08X:
     @property
     def game_quaternion(self):
         """A quaternion representing the current rotation vector with no specific reference for heading,
-        while roll and pitch are referenced against gravity. To  prevent sudden jumps in heading due to corrections,
+        while roll and pitch are referenced against gravity. To prevent sudden jumps in heading due to corrections,
         the `game_quaternion` property is not corrected using the magnetometer. Drift is expected ! """
         self._process_available_packets()
         try:
@@ -942,7 +933,7 @@ class BNO08X:
     def euler_conversion(i, j, k, r):
         """
         Converts quaternion values to Euler angles to degrees.
-        This uses the common aerospace/robotics convention (XYZ rotation order: roll-pitch-yaw).
+        Uses common aerospace/robotics convention (XYZ rotation order: roll-pitch-yaw).
         """
         jsqr = j * j
         t0 = 2.0 * (r * i + j * k)
@@ -1039,9 +1030,8 @@ class BNO08X:
     @property
     def begin_calibration(self) -> int:
         """
-        Request manual calibration
-        6.4.6.1 SH-2: Command Request sent to configure the ME calibration for accelerometer, gyro and
-        magnetometer giving the user the ability to control when calibration is performed.
+        Request manual calibration.  6.4.6.1 SH-2: Command Request to configure the ME calibration for
+        accelerometer, gyro and magnetometer giving the ability to control when calibration is performed.
         """
         self._send_me_command(_ME_CALIBRATE_COMMAND,
                               [
