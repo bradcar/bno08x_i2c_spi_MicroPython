@@ -49,7 +49,7 @@ class BNO08X_I2C(BNO08X):
 
     def __init__(self, i2c_bus, address=_BNO08X_DEFAULT_ADDRESS, reset_pin=None, int_pin=None, debug=False):
         if not _is_i2c(i2c_bus):
-            raise TypeError("i2c_bus must be an I2C-like object with needed interfaces") 
+            raise TypeError("i2c_bus must be an I2C object with required interfaces")
         
         self._i2c = i2c_bus
         self._debug = debug
