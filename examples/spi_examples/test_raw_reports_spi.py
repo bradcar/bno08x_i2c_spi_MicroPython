@@ -21,16 +21,16 @@ cs_pin = Pin(17, Pin.OUT, value=1)
 # mosi=Pin(19) - BNO SI (PICO)
 wake_pin = Pin(20, Pin.OUT, value=1)  # BNO WAK
 
-spi = SPI(0, sck=Pin(18), mosi=Pin(19), miso=Pin(16), baudrate=3_000_000)
+spi = SPI(0, sck=Pin(18), mosi=Pin(19), miso=Pin(16))
 
 print("Start")
 bno = BNO08X_SPI(spi, cs_pin, reset_pin, int_pin, wake_pin, debug=False)
-print(spi)  # Notice polarity=1, phase=1 for bno08x
+print(spi)
 print("====================================\n")
 
-bno.enable_feature(BNO_REPORT_RAW_ACCELEROMETER)
-bno.enable_feature(BNO_REPORT_RAW_MAGNETOMETER)
-bno.enable_feature(BNO_REPORT_RAW_GYROSCOPE)
+bno.enable_feature(BNO_REPORT_RAW_ACCELEROMETER, 10)
+bno.enable_feature(BNO_REPORT_RAW_MAGNETOMETER, 10)
+bno.enable_feature(BNO_REPORT_RAW_GYROSCOPE, 10)
 
 # sensor default frequencies
 bno.print_report_period()

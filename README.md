@@ -192,9 +192,9 @@ On the Sparkfun BNO086 when using SPI, you must clear i2c jumper when using SPI 
     cs_pin = Pin(17, Pin.OUT)  # cs for SPI (CS)
     wake_pin = Pin(20, Pin.OUT, value=1)  # BNO sensor (WAK)
 
-    spi = SPI(0, sck=Pin(18), mosi=Pin(19), miso=Pin(16), baudrate=3_000_000)
-    print(spi)
+    spi = SPI(0, sck=Pin(18), mosi=Pin(19), miso=Pin(16))
     bno = BNO08X_SPI(spi, cs_pin=cs_pin, int_pin=int_pin, reset_pin=reset_pin, wake_pin=wake_pin)
+    print(spi)
 
 Required for SPI:
 - int_pin : required for operation and also gives accurate sensor timestamps. Define a Pin object, not  number.
@@ -204,6 +204,7 @@ Required for SPI:
 
 Optional for SPI:
 - debug : prints very detailed logs, primarily for driver debug & development.
+- baudrate : default is 3_000_000 (3MHz)
 
 ## UART Setup -- TODO  UART IN DEBUG !!! TODO  UART IN DEBUG !!! TODO  UART IN DEBUG !!!
 WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING
