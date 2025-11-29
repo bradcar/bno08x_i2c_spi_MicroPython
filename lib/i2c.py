@@ -65,14 +65,14 @@ class BNO08X_I2C(BNO08X):
             raise TypeError(f"Reset (RST) pin must be a Pin object or None, not {type(reset_pin)}")
         self._reset = reset_pin
         
-        try:
-            self._i2c.readfrom(self._bno_i2c_addr, 1) # test if i2c device present
-        except OSError as e:
-            if e.errno in (errno.ENODEV, errno.EIO, OSError):
-                raise RuntimeError(
-                    f"No I2C device found at address {hex(self._bno_i2c_addr)}"
-                ) from e
-            raise
+#         try:
+#             self._i2c.readfrom(self._bno_i2c_addr, 1) # test if i2c device present
+#         except OSError as e:
+#             if e.errno in (errno.ENODEV, errno.EIO, OSError):
+#                 raise RuntimeError(
+#                     f"No I2C device found at address {hex(self._bno_i2c_addr)}"
+#                 ) from e
+#             raise
     
         # I2C can not use cs_Pin or wake_pin
         super().__init__(_interface, reset_pin=reset_pin, int_pin=int_pin, cs_pin=None, wake_pin=None, debug=debug)
@@ -166,3 +166,12 @@ class BNO08X_I2C(BNO08X):
         # self._dbg(f"New Packet: {new_packet}")
         return new_packet
 
+    # I2C _data_ready logic. resets _data_available flag for next int event
+    @property
+    def _data_ready(self):
+        if self._int.value() == 0:
+            self._data_available = True
+
+        ready = self._data_available
+        self._data_available = False
+        return ready

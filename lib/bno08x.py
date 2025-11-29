@@ -643,22 +643,24 @@ class BNO08X:
 
     def __init__(self, _interface, reset_pin=None, int_pin=None, cs_pin=None, wake_pin=None, debug=False) -> None:
 
-        self._debug = debug
         self._reset_pin = reset_pin
         self._int_pin = int_pin
         self._wake_pin = wake_pin
         self._cs_pin = cs_pin
+        self._interface = _interface
+        self._debug = debug
 
         # set int_pin interrupt, Active-low interrupt → falling edge
         self._int_pin.irq(trigger=Pin.IRQ_FALLING, handler=self._on_interrupt)
 
-        self._dbg(f"********** __init__ on {_interface} Interface *************\n")
+        self._dbg(f"********** __init__ on {self._interface} Interface *************\n")
         self._data_buffer: bytearray = bytearray(DATA_BUFFER_SIZE)
         self._data_buffer_memoryview = memoryview(self._data_buffer)
         self._command_buffer: bytearray = bytearray(12)
         self._packet_slices = []
         self.last_interrupt_ms = -1  #used to signal first interrupt
         self.prev_interrupt_ms = -1
+        self._data_available = False
         self._sensor_epoch_ms = 0.0
         self._last_base_timestamp_us = 0
 
@@ -700,6 +702,7 @@ class BNO08X:
             self._epoch_start_ms = ticks_ms()  # self._sensor_epoch_ms = 0.0  set in __init__
         self.prev_interrupt_ms = self.last_interrupt_ms
         self.last_interrupt_ms = ticks_ms()
+        self._data_available = True
 
     def reset_sensor(self):
         if self._reset_pin:
@@ -1287,7 +1290,7 @@ class BNO08X:
         # Feature response (0xfc)
         if report_id == _GET_FEATURE_RESPONSE:
             _report_id, feature_report_id = unpack_from("<BB", report_bytes)
-            self._report_values[feature_report_id] = _INITIAL_REPORTS.get(feature_report_id, (0.0, 0.0, 0.0, 0, 0))
+            self._report_values[feature_report_id] = _INITIAL_REPORTS.get(feature_report_id, (0.0, 0.0, 0.0, 0, 0.0))
             self._unread_report_count[feature_report_id] = 0
             return
 
@@ -1356,7 +1359,7 @@ class BNO08X:
             accuracy = s.byte2 & 0x03
             #delay_raw = ((s.byte2 >> 2) << 8) | s.byte3
             delay_raw = ((s.byte2 & 0xFC) << 6) | s.byte3
-            delay_ms = delay_raw * 0.1  # notice delay_ms if float, we have 0.1ms accuracy
+            delay_ms = delay_raw * 0.1  # notice delay_ms if a float, we have 0.1ms accuracy
 
             # scale sensor data by Q-point scalar, likely e1 needs a different Q-point scalar
             if count == 3:
@@ -1606,7 +1609,7 @@ class BNO08X:
                 # Expected if a partial/corrupt packet is read
                 pass
 
-        raise RuntimeError("_check_id: Timeout waiting for valid Product ID response")
+        raise RuntimeError(f"Timeout waiting for valid Product ID response, check your {self._interface} interface")
 
     def _dbg(self, *args, **kwargs) -> None:
         if self._debug:

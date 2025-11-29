@@ -50,6 +50,9 @@ class BNO08X_UART(BNO08X):
     """
 
     def __init__(self, uart, reset_pin=None, int_pin=None, debug=False):
+        if uart is None:
+            raise RuntimeError("UART bus object (uart) must be provided for BNO08X_UART operation.")
+      
         self._uart = uart
         self._debug = debug
         _interface = "UART"
