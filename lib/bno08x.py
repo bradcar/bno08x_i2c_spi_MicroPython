@@ -1138,33 +1138,27 @@ class BNO08X:
         return flag
 
     def _wait_for_packet(self, channel, report_id=None, timeout=0.5):
-        """
-        Polls the BNO08x for a specific packet response up to a timeout.
-
-        @param channel: SHTP channel
-        @param report_id: specific SHTP ReportID to wait for (optional).
-        @param timeout: Timeout duration in seconds.
-        @return: received packet.
-        @raises: RuntimeError if timeout occurs.
-        """
+        """ Wait for a specifc packet to be received on channel, ignore others """
         start_time = ticks_ms()
         while _elapsed_sec(start_time) < timeout:
-            # Attempt a non-blocking read via the SPI driver
-            # check for INT line and read the SHTP header
-            # return the full packet or None/raise an exception if no packet is ready
             try:
                 packet = self._read_packet(wait=False)
-                if packet is not None:
-                    self._handle_packet(packet)
-
-                    if channel == packet.header.channel_number and (report_id is None or report_id == packet.report_id):
-                        return packet
             except PacketError:
-                pass
+                sleep_ms(1)
+                continue
+
+            if packet is not None:
+                if (packet.header.channel_number == channel and
+                    (report_id is None or report_id == packet.report_id)):
+                    # NOW we handle it because it's the expected response
+                    self._handle_packet(packet)
+                    return packet
+                # Otherwise ignore and read another packet
             sleep_ms(1)
 
         raise RuntimeError(
-            f"Timed out waiting for packet on channel {channel} with ReportID {report_id} after {timeout}s")
+            f"Timed out waiting for packet on channel {channel} with ReportID {report_id} after {timeout}s"
+        )
 
     def _handle_packet(self, packet):
         """
@@ -1440,7 +1434,8 @@ class BNO08X:
         """
         Enable sensor features for bno08x, set period in usec (not ms)
         Called recursively since some raw require non-raw to be enabled
-        On Channel (0x02), send _SET_FEATURE_COMMAND (0xfb) with feature id await GET_FEATURE_RESPONSE (0xfc)
+        On Channel (0x02), send _SET_FEATURE_COMMAND (0xfb) with feature id
+        On Channel (0x02), await GET_FEATURE_RESPONSE (0xfc) with actual eabled period
         """
         self._dbg(f"ENABLING FEATURE ID... {hex(feature_id)}")
         set_feature_report = bytearray(17)
@@ -1456,19 +1451,22 @@ class BNO08X:
             requested_interval = 0 # effectively turns of reports? but feature still enabled
             
         pack_into("<I", set_feature_report, 5, requested_interval)
+        
         if feature_id == BNO_REPORT_ACTIVITY_CLASSIFIER:
             pack_into("<I", set_feature_report, 13, _ENABLED_ACTIVITIES)
 
+        # raw sensor rate cannot be higher than the underlying sensor rate
         feature_dependency = _RAW_REPORTS.get(feature_id, None)
         if feature_dependency and feature_dependency not in self._report_values:
             self._dbg(f" Feature dependency detected, now also enable...")
             self._dbg(f"{_REPORTS_DICTIONARY[feature_dependency]} {hex(feature_dependency)}")
             self.enable_feature(feature_dependency, freq)
 
+        # send request _SET_FEATURE_COMMAND (0xfb) with requested period
         self._wake_signal()
         self._send_packet(_BNO_CHANNEL_CONTROL, set_feature_report)
-        sleep_ms(20) # feature dependency must be enabled before raw, give it time
 
+        # wait for response, ignore packets until _GET_FEATURE_RESPONSE (0xfc)
         try:
             report_bytes = self._wait_for_packet(_BNO_CHANNEL_CONTROL, _GET_FEATURE_RESPONSE,
                                                  timeout=_FEATURE_ENABLE_TIMEOUT)

@@ -28,9 +28,9 @@ bno = BNO08X_SPI(spi, cs_pin, reset_pin, int_pin, wake_pin, debug=False)
 print(spi)
 print("====================================\n")
 
-bno.enable_feature(BNO_REPORT_RAW_ACCELEROMETER, 10)
-bno.enable_feature(BNO_REPORT_RAW_MAGNETOMETER, 10)
-bno.enable_feature(BNO_REPORT_RAW_GYROSCOPE, 10)
+bno.enable_feature(BNO_REPORT_RAW_ACCELEROMETER)
+bno.enable_feature(BNO_REPORT_RAW_MAGNETOMETER)
+bno.enable_feature(BNO_REPORT_RAW_GYROSCOPE)
 
 # sensor default frequencies
 bno.print_report_period()
