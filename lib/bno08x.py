@@ -932,6 +932,7 @@ class BNO08X:
             raise RuntimeError(
                 "activity classification report not enabled, use bno.enable_feature(BNO_REPORT_ACTIVITY_CLASSIFIER)") from None
 
+# User helper functions
     def bno_start_diff(self, ticks: int) -> int:
         """ Return milliseconds difference between ticks and sensor startup """
         return ticks_diff(ticks, self._epoch_start_ms)
@@ -956,6 +957,11 @@ class BNO08X:
         yaw = degrees(atan2(t3, t4))
 
         return roll, tilt, yaw
+    
+    @staticmethod
+    def degree_conversion(x, y, z):
+        """ Converts gyro rad/s to degree/sec """
+        return x * 57.2957795, y * 57.2957795, z * 57.2957795
 
     # ======== Motion Engine (ME) Tare and Calibration (manual) ========
 
@@ -1098,44 +1104,70 @@ class BNO08X:
                 return
         raise RuntimeError("Could not save calibration data")
 
-    ############### private/helper methods ###############
+#     ############### private/helper methods ###############
+# 
+#     def _process_available_packets(self, max_packets: int = 10) -> bool:
+#         """
+#         Read and handle up to `max_packets` packets while processing an interrupt
+#         If _read_packet() does not return all data for one interrupt, we may need a “drain loop”
+#         """
+#         processed_count = 0
+#         start_time = ticks_ms()
+# 
+#         while self._data_ready and processed_count < max_packets:
+# 
+#             if ticks_diff(ticks_ms(), start_time) > 1:
+#                 # * commented out self._dbg in time critical loops for normal operation
+#                 # self._dbg("1 ms Timeout in _process_available_packets")
+#                 # self._dbg(f"* {processed_count=}")
+#                 break
+# 
+#             try:
+#                 new_packet = self._read_packet(wait=False)
+#             except PacketError:
+#                 # Transient read errors should not block
+#                 sleep_us(100)
+#                 continue
+# 
+#             if new_packet is None:
+#                 break
+# 
+#             self._handle_packet(new_packet)
+#             processed_count += 1
+#             # * commented out self._dbg in time critical loops for normal operation
+#             # self._dbg(f"Processed {processed_count} packet{'s' if processed_count > 1 else ''}")
+#             # self._dbg(f"{new_packet=}")
+# 
+#         flag = processed_count > 0
+#         # * commented out self._dbg in time critical loops for normal operation
+#         # self._dbg(f"_process_available_packets done, {processed_count} packets processed - {flag}")
+#         return flag
 
     def _process_available_packets(self, max_packets: int = 10) -> bool:
         """
-        Read and handle up to `max_packets` packets while processing an interrupt
-        If _read_packet() does not return all data for one interrupt, we may need a “drain loop”
+        Fast processing of packets while data-ready is active.
         """
         processed_count = 0
-        start_time = ticks_ms()
+        end_time = ticks_ms() + 1  # 1 ms guard
 
         while self._data_ready and processed_count < max_packets:
-
-            if ticks_diff(ticks_ms(), start_time) > 1:
-                # * commented out self._dbg in time critical loops for normal operation
-                # self._dbg("1 ms Timeout in _process_available_packets")
-                # self._dbg(f"* {processed_count=}")
+            if ticks_diff(ticks_ms(), end_time) >= 0:
                 break
 
             try:
-                new_packet = self._read_packet(wait=False)
+                packet = self._read_packet(wait=False)
             except PacketError:
-                # Transient read errors should not block
-                sleep_us(100)
                 continue
 
-            if new_packet is None:
+            if packet is None:
                 break
 
-            self._handle_packet(new_packet)
+            self._handle_packet(packet)
             processed_count += 1
             # * commented out self._dbg in time critical loops for normal operation
             # self._dbg(f"Processed {processed_count} packet{'s' if processed_count > 1 else ''}")
             # self._dbg(f"{new_packet=}")
-
-        flag = processed_count > 0
-        # * commented out self._dbg in time critical loops for normal operation
-        # self._dbg(f"_process_available_packets done, {processed_count} packets processed - {flag}")
-        return flag
+        return processed_count > 0
 
     def _wait_for_packet(self, channel, report_id=None, timeout=0.5):
         """ Wait for a specifc packet to be received on channel, ignore others """
@@ -1636,11 +1668,10 @@ class BNO08X:
     def _wake_signal(self):
         """ Wake is only performaed for spi operation  """
         if self._wake_pin is not None:
-            self._dbg("WAKE pulse to ensure BNO08x is out of sleep")
+            self._dbg("WAKE pulse to BNO08x")
             self._wake_pin.value(0)
-            sleep_ms(2)  # over 200 usec required in datasheet
+            sleep_us(500)  # typ 150 usec required in datasheet BNO datasheet Fig 6-=11 Host Int timing SPI
             self._wake_pin.value(1)
-            sleep_ms(10)  # 1 ms works, 1 ms sometimes fails
 
     def _send_packet(self, channel, data):
         raise RuntimeError("_send_packet Not implemented in bno08x.py, supplanted by I2C or SPI subclass")
