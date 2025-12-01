@@ -117,7 +117,7 @@ _ME_TARE_NOW = const(0x00)
 _ME_PERSIST_TARE = const(0x01)
 _ME_TARE_SET_REORIENTATION = const(0x02)
 
-# Reports Summary depending on BNO device
+# Reports Summary, some require other sensors be connected to BNO
 BNO_REPORT_ACCELEROMETER = const(0x01)  # bno.acceleration (m/s^2, gravity acceleration included)
 BNO_REPORT_GYROSCOPE = const(0x02)  # bno.gyro (rad/s).
 BNO_REPORT_MAGNETOMETER = const(0x03)  # bno.magnetic (in µTesla).
@@ -932,7 +932,7 @@ class BNO08X:
             raise RuntimeError(
                 "activity classification report not enabled, use bno.enable_feature(BNO_REPORT_ACTIVITY_CLASSIFIER)") from None
 
-# User helper functions
+    # User helper functions
     def bno_start_diff(self, ticks: int) -> int:
         """ Return milliseconds difference between ticks and sensor startup """
         return ticks_diff(ticks, self._epoch_start_ms)
@@ -950,14 +950,14 @@ class BNO08X:
 
         t2 = 2.0 * (r * j - k * i)
         t2 = max(-1.0, min(1.0, t2))
-        tilt = degrees(asin(t2))
+        pitch = degrees(asin(t2))
 
         t3 = 2.0 * (r * k + i * j)
         t4 = 1.0 - 2.0 * (jsqr + k * k)
         yaw = degrees(atan2(t3, t4))
 
-        return roll, tilt, yaw
-    
+        return roll, pitch, yaw
+
     @staticmethod
     def degree_conversion(x, y, z):
         """ Converts gyro rad/s to degree/sec """
@@ -1011,6 +1011,8 @@ class BNO08X:
         """
         Send quaternion reorientation for tare.
         Quaternion components are sent as 16-bit signed ints (Q14), LSB first.
+        Used to set orientation of sensor for example of sensor pcb is mounted vertically
+        you can use this to set left edge down, and the other directions.
         """
         # Convert floats to int16 using Q14 fixed-point
         qi = int(i * (1 << 14))
@@ -1104,44 +1106,7 @@ class BNO08X:
                 return
         raise RuntimeError("Could not save calibration data")
 
-#     ############### private/helper methods ###############
-# 
-#     def _process_available_packets(self, max_packets: int = 10) -> bool:
-#         """
-#         Read and handle up to `max_packets` packets while processing an interrupt
-#         If _read_packet() does not return all data for one interrupt, we may need a “drain loop”
-#         """
-#         processed_count = 0
-#         start_time = ticks_ms()
-# 
-#         while self._data_ready and processed_count < max_packets:
-# 
-#             if ticks_diff(ticks_ms(), start_time) > 1:
-#                 # * commented out self._dbg in time critical loops for normal operation
-#                 # self._dbg("1 ms Timeout in _process_available_packets")
-#                 # self._dbg(f"* {processed_count=}")
-#                 break
-# 
-#             try:
-#                 new_packet = self._read_packet(wait=False)
-#             except PacketError:
-#                 # Transient read errors should not block
-#                 sleep_us(100)
-#                 continue
-# 
-#             if new_packet is None:
-#                 break
-# 
-#             self._handle_packet(new_packet)
-#             processed_count += 1
-#             # * commented out self._dbg in time critical loops for normal operation
-#             # self._dbg(f"Processed {processed_count} packet{'s' if processed_count > 1 else ''}")
-#             # self._dbg(f"{new_packet=}")
-# 
-#         flag = processed_count > 0
-#         # * commented out self._dbg in time critical loops for normal operation
-#         # self._dbg(f"_process_available_packets done, {processed_count} packets processed - {flag}")
-#         return flag
+    #     ############### private/helper methods ###############
 
     def _process_available_packets(self, max_packets: int = 10) -> bool:
         """
@@ -1153,12 +1118,10 @@ class BNO08X:
         while self._data_ready and processed_count < max_packets:
             if ticks_diff(ticks_ms(), end_time) >= 0:
                 break
-
             try:
                 packet = self._read_packet(wait=False)
             except PacketError:
                 continue
-
             if packet is None:
                 break
 
@@ -1182,10 +1145,10 @@ class BNO08X:
             # Continue to read & ignore packets until we find selected response
             if packet is not None:
                 if (packet.header.channel_number == channel and
-                    (report_id is None or report_id == packet.report_id)):
+                        (report_id is None or report_id == packet.report_id)):
                     self._handle_packet(packet)
                     return packet
-                
+
             sleep_ms(1)
 
         raise RuntimeError(
@@ -1472,17 +1435,17 @@ class BNO08X:
         set_feature_report = bytearray(17)
         set_feature_report[0] = _SET_FEATURE_COMMAND
         set_feature_report[1] = feature_id
-        
+
         if freq is None:
             freq = DEFAULT_REPORT_FREQ[feature_id]
-            
+
         if freq != 0:
             requested_interval = int(1_000_000 / freq)
         else:
-            requested_interval = 0 # effectively turns of reports? but feature still enabled
-            
+            requested_interval = 0  # effectively turns of reports? but feature still enabled
+
         pack_into("<I", set_feature_report, 5, requested_interval)
-        
+
         if feature_id == BNO_REPORT_ACTIVITY_CLASSIFIER:
             pack_into("<I", set_feature_report, 13, _ENABLED_ACTIVITIES)
 
@@ -1525,44 +1488,6 @@ class BNO08X:
         for feature_id in self._report_periods_dictionary_us.keys():
             period_ms = self.report_period_us(feature_id) / 1000.0
             print(f"\t{_REPORTS_DICTIONARY[feature_id]}\t{period_ms:.1f} ms, {1_000 / period_ms:.1f} Hz")
-
-    def set_orientation(self, quaternion):
-        """
-        # set orientation of the system
-        self._dbg("DEVICE ORIENTATION SETTING UP...")
-        set_orientation = bytearray(17)
-        set_orientation[0] = FRS_WRITE_REQUEST
-        set_orientation[1] = 0,  # reserved
-        set_orientation[2] = 0,  # Length LSB
-        set_orientation[3] = BNO_CONF_SYSTEM_ORIENTATION & 0xFF,  # FRS Type LSB
-        set_orientation[4] = BNO_CONF_SYSTEM_ORIENTATION >> 80,  # FRS Type MSB
-        
-        self._wake_signal()
-        self._send_packet(BNO_CHANNEL_CONTROL, set_orientation)
-
-        set_orientation[0] = FRS_WRITE_DATA
-        set_orientation[1] = 0,  # reserved
-        set_orientation[2] = 0,  # Offset LSB
-        set_orientation[3] = 0,  # Offset MSB
-        set_orientation[4] = ORENT_QW & 0xFF,  # Data0 LSB
-        set_orientation[5] = ORENT_QW >> 8,  # Data0 MSB
-        set_orientation[6] = 0,  # Offset LSB
-        set_orientation[7] = 0,  # Offset MSB
-        set_orientation[8] = ORENT_QX & 0xFF,  # Data1 LSB
-        set_orientation[9] = ORENT_QX >> 8,  # Data1 MSB
-        set_orientation[10] = 0,  # Offset LSB
-        set_orientation[11] = 0,  # Offset MSB
-        set_orientation[12] = ORENT_QY & 0xFF,  # Data2 LSB
-        set_orientation[13] = ORENT_QY >> 8,  # Data2 MSB
-        set_orientation[14] = 0,  # Offset LSB
-        set_orientation[15] = 0,  # Offset MSB
-        set_orientation[16] = ORENT_QZ & 0xFF,  # Data2 LSB
-        set_orientation[17] = ORENT_QZ >> 8,  # Data2 MSB
-
-        self._wake_signal()
-        self._send_packet(BNO_CHANNEL_CONTROL, set_orientation)
-        """
-        return  # Procedure to be completed and corrected
 
     def _check_id(self):
         """
