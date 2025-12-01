@@ -15,8 +15,8 @@ reset_pin = Pin(15, Pin.OUT)  # BNO sensor (RST)
 i2c0 = I2C(0, scl=Pin(13), sda=Pin(12), freq=400_000)
 bno = BNO08X_I2C(i2c0, address=0x4b, reset_pin=reset_pin, int_pin=int_pin, debug=False)
 
-print("Start")
 print("I2C devices found:", [hex(d) for d in i2c0.scan()])
+print("Start")
 print("===========================")
 
 bno.enable_feature(BNO_REPORT_ROTATION_VECTOR, 20)
@@ -48,7 +48,7 @@ for t in range(5, 0, -1):
 axis = 0x07  # tare all Axis (z, y, x)
 bno.tare(axis, BNO_REPORT_ROTATION_VECTOR)
 
-print(f"\n\n*** Tare the sensor ({hex(axis)}, {hex(BNO_REPORT_ROTATION_VECTOR)})\n")
+print(f"\n\n*** Tare the sensor axis=({hex(axis)}, {hex(BNO_REPORT_ROTATION_VECTOR)=})\n")
 
 # show new orientation based on tare for 9 seconds
 for t in range(1, 9):

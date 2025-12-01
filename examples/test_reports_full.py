@@ -18,10 +18,11 @@ int_pin = Pin(14, Pin.IN, Pin.PULL_UP)  # BNO sensor (INT)
 reset_pin = Pin(15, Pin.OUT)  # BNO sensor (RST)
 
 i2c0 = I2C(0, scl=Pin(13), sda=Pin(12), freq=400_000)
-bno = BNO08X_I2C(i2c0, address=0x4b, reset_pin=reset_pin, int_pin=int_pin, debug=False)
+print("I2C devices found:", [hex(d) for d in i2c0.scan()])
+
+bno = BNO08X_I2C(i2c0, address=0x4b, reset_pin=reset_pin, int_pin=int_pin, debug=True)
 
 print("Start")
-print("I2C devices found:", [hex(d) for d in i2c0.scan()])
 print("===========================")
 
 # with 0.25s sleep in loop, we request 4Hz reports (~0.25s)
@@ -36,10 +37,12 @@ print("\nBNO08x sensors enabled")
 
 while True:
     sleep(.25)
-    
+        
     ms_since_sensor_start = bno.bno_start_diff(ticks_ms())
-    print(f"\nsystem timestamp {ticks_ms()=}, seconds from bno start: {ms_since_sensor_start/1000.0:.3f} sec")
-
+    print(f"\nsystem {ticks_ms()=},",
+        f"seconds from BNO start: {ms_since_sensor_start/1000.0:.4f} s",
+        f"({ms_since_sensor_start:.0f} ms)")
+    
     accel_x, accel_y, accel_z, acc, ts_ms = bno.acceleration.full
     print(f"\nAcceleration X: {accel_x:+.3f}  Y: {accel_y:+.3f}  Z: {accel_z:+.3f}  m/s²")
     print(f"Acceleration: accuracy={acc}, {ts_ms=:.1f}")

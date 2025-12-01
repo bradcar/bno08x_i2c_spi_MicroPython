@@ -16,8 +16,8 @@ reset_pin = Pin(15, Pin.OUT)  # BNO sensor (RST)
 i2c0 = I2C(0, scl=Pin(13), sda=Pin(12), freq=400_000)
 bno = BNO08X_I2C(i2c0, address=0x4b, reset_pin=reset_pin, int_pin=int_pin)
 
-print("Start")
 print("I2C devices found:", [hex(d) for d in i2c0.scan()])
+print("Start")
 print("===========================")
 
 bno.enable_feature(BNO_REPORT_RAW_ACCELEROMETER)
