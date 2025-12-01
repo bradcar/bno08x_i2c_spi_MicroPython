@@ -107,9 +107,7 @@ If you are using quaternions for various processing and at a later time you want
 you can use the following conversion function which uses the common aerospace/robotics convention (XYZ rotation order: roll-pitch-yaw).
 
     i, j, k, r = bno.quaternion
-
     # ...various quaternion processing
-
     roll, pitch, yaw = euler_conversion(new_i, new_j, new_k, new_r)
 
 **Examples of other sensor reports**
@@ -141,6 +139,13 @@ The following can be used to tare and manually calibrate the sensor:
     bno.calibration_status  # wait for sensor to be ready to calibrate
     # loop to test acceleration, magnetic, gyro  - see examples/test_calibration.py
     bno.save_calibration_data
+
+To set the sensor board orientation you can use  (if mounting board vertically, or if you want a different part of the sensor to be "forward")
+
+    i, j, k, real = bno.quaternion              # rotation 4-tuple of i,j,k,real float returned
+    # perform calcuations to transform tuple for your direction to tare on, then set, and save (see references below)
+    bno.tare_reorientation(i, j, k, real)
+    bno.save_tare_data
 
 We also supply the following conversion helper function:
 
@@ -186,7 +191,7 @@ The PS0 (Wake_pin) must be connected to a gpio (wake_pin), please be careful not
 This driver uses the wake-pin after reset as a ‘wake’ signal taking the BNO08X out of sleep for communication with the BNO08X.
 On the Sparkfun BNO086 when using SPI, you must clear i2c jumper when using SPI or UART (https://docs.sparkfun.com/SparkFun_VR_IMU_Breakout_BNO086_QWIIC/assets/board_files/SparkFun_VR_IMU_Breakout_BNO086_QWIIC_Schematic_v10.pdf)
 
- SPI should be set to baudrate=3_000_000.
+SPI should be set to baudrate=3000000.
 
     from bno08x import *
     from i2c import BNO08X_I2C
@@ -197,7 +202,7 @@ On the Sparkfun BNO086 when using SPI, you must clear i2c jumper when using SPI 
     cs_pin = Pin(17, Pin.OUT)  # cs for SPI (CS)
     wake_pin = Pin(20, Pin.OUT, value=1)  # BNO sensor (WAK)
 
-    spi = SPI(0, sck=Pin(18), mosi=Pin(19), miso=Pin(16))
+    spi = SPI(0, baudrate=3000000, sck=Pin(18), mosi=Pin(19), miso=Pin(16))
     bno = BNO08X_SPI(spi, cs_pin=cs_pin, int_pin=int_pin, reset_pin=reset_pin, wake_pin=wake_pin)
     print(spi)
 
@@ -209,7 +214,8 @@ Required for SPI:
 
 Optional for SPI:
 - debug : prints very detailed logs, primarily for driver debug & development.
-- baudrate : default is 3_000_000 (3MHz)
+
+This driver will reset the spi to have polarity=1 and phase=1 as required by the bno08x.
 
 ## UART Setup -- TODO  UART IN DEBUG !!! TODO  UART IN DEBUG !!! TODO  UART IN DEBUG !!!
 WARNING - WARNING
@@ -223,12 +229,12 @@ WARNING - WARNING
     int_pin = Pin(14, Pin.IN, Pin.PULL_UP)  # Interrupt, BNO (RST) signals when ready
     reset_pin = Pin(15, Pin.OUT, value=1)  # Reset, tells BNO (INT) to reset
 
-    uart = UART(1, baudrate=3_000_000, tx=Pin(8), rx=Pin(9), timeout=500)
+    uart = UART(1, baudrate=3000000, tx=Pin(8), rx=Pin(9), timeout=500)
     bno = BNO08X_UART(uart, reset_pin=reset_pin, int_pin=int_pin, debug=False)
 
 UART wires are, in some sense, opposite of i2c wires (double-check your wiring).
-uart = UART(1, baudrate=3_000_000, tx=Pin(8), rx=Pin(9), timeout=2000)
-uart = UART(0, baudrate=3_000_000, tx=Pin(12), rx=Pin(13), timeout=2000)
+uart = UART(1, baudrate=3000000, tx=Pin(8), rx=Pin(9), timeout=2000)
+uart = UART(0, baudrate=3000000, tx=Pin(12), rx=Pin(13), timeout=2000)
 
 Required for UART:
 - int_pin : required by UART for accurate sensor timestamps. Define a Pin object, not number.
@@ -238,6 +244,8 @@ PS0 and PS1 are the host interface protocol selection pins, therefore UART can n
 
 1. must clear i2c jumper when using SPI or UART (https://docs.sparkfun.com/SparkFun_VR_IMU_Breakout_BNO086_QWIIC/assets/board_files/SparkFun_VR_IMU_Breakout_BNO086_QWIIC_Schematic_v10.pdf)
 2. must have solder blob ONLY on SP1, must NOT have Wake pin connect to a pin.
+
+Note: Baudrate must be defined in UART call and not BNO08X_UART.
 
 ## Details on Report Frequencies
 
@@ -333,5 +341,6 @@ The CEVA BNO085 and BNO086 9-axis sensors are made by Ceva (https://www.ceva-ip.
 - https://www.ceva-ip.com/wp-content/uploads/BNO080_085-Datasheet.pdf
 - https://cdn.sparkfun.com/assets/4/d/9/3/8/SH-2-Reference-Manual-v1.2.pdf
 - https://cdn.sparkfun.com/assets/7/6/9/3/c/Sensor-Hub-Transport-Protocol-v1.7.pdf
+- https://docs.sparkfun.com/SparkFun_VR_IMU_Breakout_BNO086_QWIIC/assets/component_documentation/BNO080-BNO085-Tare-Function-Usage-Guide.pdf
 
 Bosch has a new 6-axis IMU BHI385 (announced June 2025) that can be paired with BMM350 3-axis Geomagnetic sensor.
