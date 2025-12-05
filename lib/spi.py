@@ -116,7 +116,7 @@ class BNO08X_SPI(BNO08X):
         while ticks_diff(ticks_ms(), start_time) < 3000:  # 3.0sec
             if self.last_interrupt_us != self.prev_interrupt_us:
                 return
-            sleep_us(10)  # 10 us give 5.4ms loop 1ms give 5.4ms loop
+            sleep_us(10)  # 10 us 
         raise RuntimeError("Timeout (3.0s) waiting for INT flag to be set")
     
     def _send_packet(self, channel, data):
@@ -130,8 +130,7 @@ class BNO08X_SPI(BNO08X):
         
         if self._debug:
             packet = Packet(self._data_buffer)
-            self._dbg("")
-            self._dbg(f"Sending packet: {packet}")
+            self._dbg(f"  Sending Packet *************{packet}")
 
         self._cs.value(0)
         sleep_us(1)
@@ -152,20 +151,15 @@ class BNO08X_SPI(BNO08X):
 
         self._cs.value(0)
         sleep_us(1)
-        mv = memoryview(self._data_buffer)[:4]
-        self._spi.readinto(mv, 0x00)
+        mv = memoryview(self._data_buffer)
+        self._spi.readinto(mv[:4], 0x00)
         self._cs.value(1)
-
+        
+        # header_view here seems required - weird, unknown side effect
         header_view = uctypes.struct(uctypes.addressof(mv), _HEADER_STRUCT, uctypes.LITTLE_ENDIAN)
-
-        if not wait:
-            packet_length = header_view.packet_bytes
-
-            if packet_length == 0xFFFF or packet_length == 0:
-                raise PacketError("No valid packet received despite INT being low")
     
-            # * commented out self._dbg in time critical loops for normal operation
-            # self._dbg(f"Non-blocking read SUCCESS. Header length: {packet_length}. Pin state: {self._int.value()}")
+        # * commented out self._dbg in time critical loops for normal operation
+        #  self._dbg(f"_read_packet header: {[hex(x) for x in self._data_buffer[0:4]]}")
 
     def _read_packet(self, wait=True):
         try:
@@ -178,16 +172,20 @@ class BNO08X_SPI(BNO08X):
                 raise PacketError("No packet available")
             raise
 
-        halfpacket = False
-        mv = memoryview(self._data_buffer)
+        mv = memoryview(self._data_buffer)[:4]
         header_view = uctypes.struct(uctypes.addressof(mv[:4]), _HEADER_STRUCT, uctypes.LITTLE_ENDIAN)
-        packet_bytes = header_view.packet_bytes
+
+        raw_packet_bytes = header_view.packet_bytes
         channel = header_view.channel
         seq = header_view.sequence
         self._rx_sequence_number[channel] = seq # SH2 Sequence number
         
-        if packet_bytes & 0x8000:
-            halfpacket = True
+        # Check for 0 length (to skip) or invalid lengths (bad sensor data, 0xFFFF)
+        if raw_packet_bytes < 4 or raw_packet_bytes == 0xFFFF:
+            raise PacketError(f"Invalid SHTP header length detected: {hex(raw_packet_bytes)}")
+        
+        halfpacket = bool(raw_packet_bytes & 0x8000)
+        packet_bytes = raw_packet_bytes & 0x7FFF
 
         if packet_bytes > DATA_BUFFER_SIZE: # if packet too big, reallocate, this is normal.
             self._data_buffer = bytearray(packet_bytes)
@@ -199,14 +197,15 @@ class BNO08X_SPI(BNO08X):
         self._cs.value(1)
 
         if halfpacket:
-            raise PacketError("read partial packet")
+            self._dbg(f"CONTINUATION in _read_packet: {packet_bytes=}")
+            # raise PacketError("read partial packet")
 
         new_packet = Packet(self._data_buffer)
         seq = new_packet.header.sequence_number
         self._rx_sequence_number[channel] = seq  # report sequence number
-        
+
         # * commented out self._dbg in time critical loops for normal operation
-        #self._dbg(f"Received Packet: {new_packet}")
+        # self._dbg(f" Received Packet *************{new_packet}")
         
         return new_packet
 

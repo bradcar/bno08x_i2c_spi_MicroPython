@@ -117,7 +117,7 @@ _ME_TARE_NOW = const(0x00)
 _ME_PERSIST_TARE = const(0x01)
 _ME_TARE_SET_REORIENTATION = const(0x02)
 
-# Reports Summary, some require other sensors be connected to BNO
+# Reports Summary depending on BNO device
 BNO_REPORT_ACCELEROMETER = const(0x01)  # bno.acceleration (m/s^2, gravity acceleration included)
 BNO_REPORT_GYROSCOPE = const(0x02)  # bno.gyro (rad/s).
 BNO_REPORT_MAGNETOMETER = const(0x03)  # bno.magnetic (in µTesla).
@@ -458,7 +458,9 @@ class Packet:
         outstr = "\n\t\t********** Packet *************\n"
         outstr += "DBG::\t\tHeader:\n"
         outstr += f"DBG::\t\t Data Len: {self.header.data_length}\n"
-        outstr += f"DBG::\t\t Channel: {channels[self.channel_number]} ({self.channel_number})\n"
+        outstr += f"DBG::\t\t Channel: {channels[self.channel_number]} ({hex(self.channel_number)})\n"
+        outstr += f"DBG::\t\t Sequence: {self.header.sequence_number}\n"
+
         if self.channel_number in {_BNO_CHANNEL_CONTROL, _BNO_CHANNEL_INPUT_SENSOR_REPORTS, }:
             if self.report_id in _REPORTS_DICTIONARY:
                 outstr += f"DBG::\t\t Report Type: {_REPORTS_DICTIONARY[self.report_id]} ({hex(self.report_id)})\n"
@@ -466,7 +468,6 @@ class Packet:
                 outstr += f"DBG::\t\t \t** UNKNOWN Report Type **: {hex(self.report_id)}\n"
             if self.report_id == 0xFC and len(self.data) >= 6 and self.data[1] in _REPORTS_DICTIONARY:
                 outstr += f"DBG::\t\t Enabled Feature: {_REPORTS_DICTIONARY[self.data[1]]} ({hex(self.data[1])})\n"
-                outstr += f"DBG::\t\t Sequence number: {self.header.sequence_number}\n"
         outstr += "\nDBG::\t\tData:"
 
         for idx, packet_byte in enumerate(self.data[:length]):
@@ -475,6 +476,8 @@ class Packet:
                 outstr += f"\nDBG::\t\t[0x{packet_index:02X}] "
             outstr += f"0x{packet_byte:02X} "
         outstr += "\n\t\t*******************************\n"
+        # ascii = ''.join(chr(b) if 32 <= b <= 126 else f" x{b:02X}" for b in self.data[:length])
+        # outstr += f"\nDBG::\t\t ascii: {ascii}\n"
         return outstr
 
     @property
@@ -506,7 +509,6 @@ class Packet:
         if header.packet_byte_count == 0xFFFF and header.sequence_number == 0xFF:
             return True
         return False
-
 
 class SensorReading3:
     """3-tuple reports with optional metadata or optional full."""
@@ -1351,7 +1353,13 @@ class BNO08X:
             # print(f"sensor irq= {(self.last_interrupt_ms - self.prev_interrupt_ms) / 1000.0} ms")
 
             self._report_values[report_id] = sensor_data + (accuracy, self._sensor_ms)
-            self._unread_report_count[report_id] += 1
+            try:
+                self._unread_report_count[report_id] += 1
+            except:
+                print(f"_process_report {report_id=} {self._unread_report_count=}")
+                print(f"{report_bytes=}")
+                self._dbg(f"_process_report report_bytes: {[hex(x) for x in report_bytes]}")
+
             return
 
         #  **** Handle all control reports, here because some are time-critical
@@ -1431,7 +1439,7 @@ class BNO08X:
         On Channel (0x02), send _SET_FEATURE_COMMAND (0xfb) with feature id
         On Channel (0x02), await GET_FEATURE_RESPONSE (0xfc) with actual eabled period
         """
-        self._dbg(f"ENABLING FEATURE ID... {hex(feature_id)}")
+        self._dbg(f"Enabling FEATURE ID: {hex(feature_id)}")
         set_feature_report = bytearray(17)
         set_feature_report[0] = _SET_FEATURE_COMMAND
         set_feature_report[1] = feature_id
@@ -1514,6 +1522,7 @@ class BNO08X:
                 if packet is None:
                     continue
                 if packet.channel_number != _BNO_CHANNEL_CONTROL:
+                    self._dbg("_check_id skipping above packet\n")
                     continue
                 if len(packet.data) == 0:
                     continue
