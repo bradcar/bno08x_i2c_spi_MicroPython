@@ -20,6 +20,14 @@ from bno08x import BNO08X, Packet, PacketError
 _BNO08X_DEFAULT_ADDRESS = const(0x4B)
 _BNO08X_BACKUP_ADDRESS = const(0x4A)
 
+# TODO Need to find definitive value
+# 272 bytes shown in ll-test GitHub
+# 256 returned by Advertisement debug=True, TAG_MAX_CARGO_PLUS_HEADER_READ
+#     BUT, then Arduino code subtracts 4, which is header size?
+# 282: x01 x1a   spi header+advert
+# 284: x01 x1c   i2c header+advert
+_SHTP_MAX_CARGO_PACKET_BYTES = 284
+
 _HEADER_STRUCT = {
     "packet_bytes": (uctypes.UINT16 | 0),
     "channel": (uctypes.UINT8 | 2),
@@ -82,23 +90,20 @@ class BNO08X_I2C(BNO08X):
         super().__init__(_interface, reset_pin=reset_pin, int_pin=int_pin, cs_pin=None, wake_pin=None, debug=debug)
 
     def _wait_for_int(self):
-        """ Waits for the BNO08x H_INTN pin to assert (go low) using the IRQ flag """
+        """
+        Waits for the BNO08x H_INTN pin to assert (go low) using the IRQ flag.
+        """
         start_time = ticks_ms()
 
-        # 2nd remove
-        self._dbg(f"_wait_for_int: INT pin={self._int.value()}, _data_ready={self._data_ready}")
-        if self._int.value() == 0 and self._data_ready:
-            # * self._dbg commented out in time critical code
-            # self._dbg("_wait_for_int: INT is active low (0) on entry and _data_ready")
+        if self._int.value() == 0:
+            self._data_available = True  # Ensure the flag is set if we missed the interrupt
+            self._dbg("INT is active low (0) on entry.")
             return
 
-        while ticks_diff(ticks_ms(), start_time) < 3000:  # 3.0sec
-            # 2nd remove
-            self._dbg(f"_wait_for_int: Polling... Ticks diff={ticks_diff(ticks_ms(), start_time)}")
-            if self._data_ready:
+        while ticks_diff(ticks_ms(), start_time) < 3000:  # 3.0 sec
+            if self.last_interrupt_us != self.prev_interrupt_us:
                 return
-            sleep_us(1000)
-
+            sleep_us(10)  # 10 us 
         raise RuntimeError("Timeout (3.0s) waiting for INT flag to be set")
 
     def _send_packet(self, channel, data):
@@ -124,6 +129,7 @@ class BNO08X_I2C(BNO08X):
         if wait:
             self._wait_for_int()
 
+        # Read 4-byte SHTP header and process
         header_mv = memoryview(self._data_buffer)[:4]
         self._i2c.readfrom_into(self._bno_i2c_addr, header_mv)
 
@@ -135,33 +141,40 @@ class BNO08X_I2C(BNO08X):
 
         # Check for 0 length (to skip) or invalid lengths (bad sensor data, 0xFFFF)
         if raw_packet_bytes == 0:
-            self._dbg("-read_packet: packet_bytes=0 (no data), returning None.")
+            self._dbg("_read_packet: packet_bytes=0, returning None.")
             return None
         if raw_packet_bytes == 0xFFFF:
             raise PacketError(f"Invalid SHTP header length detected: {hex(raw_packet_bytes)}")
 
-        halfpacket = bool(raw_packet_bytes & 0x8000)
         packet_bytes = raw_packet_bytes & 0x7FFF
-
-        self._dbg(f"I2C Header: {packet_bytes=}, {channel=}, {seq=}")
 
         if packet_bytes > len(self._data_buffer):
             self._data_buffer = bytearray(packet_bytes)
 
-        mv = memoryview(self._data_buffer)[:packet_bytes]
-        # TODO self._i2c.readfrom_into will sometimes return OSError: [Errno 110] ETIMEDOUT
-        sleep_us(200)
-        self._i2c.readfrom_into(self._bno_i2c_addr, mv)
+        if packet_bytes <= _SHTP_MAX_CARGO_PACKET_BYTES:
+            mv = memoryview(self._data_buffer)[:packet_bytes]
+            self._i2c.readfrom_into(self._bno_i2c_addr, mv)
+        else:
+            print(f"FRAGMENTED PACKET - {packet_bytes=} and {_SHTP_MAX_CARGO_PACKET_BYTES=}")
+            print(f"***** NEED to implement multi-packet reads, erasing header")
+            print(f"* Have yet to see packet_bytes > 193 bytes, algorithm sketched out")
+            print(f"* Ceva and others have no clear documentation of the max cargo bytes value")
+            print(f"{self._data_buffer}")
+            raise NotImplementedError("The multi-packet reads are NOT unimplemented. TODO")
 
-        if halfpacket:
-            self._dbg(f"CONTINUATION in _read_packet: {packet_bytes=}")
-            # raise PacketError("read partial packet")
+            # at startup some first packets have continuation, likely missed the packet before
+            # when the payload bytes are longer than the xxxxx then we must processess the next packet
+            # this should have continuation bit set
+            continuation = bool(raw_packet_bytes & 0x8000)
+            if continuation:
+                self._dbg(f"CONTINUATION in _read_packet: {packet_bytes=}")
+                # raise PacketError("read partial packet")
 
         new_packet = Packet(self._data_buffer[:packet_bytes])
         seq = new_packet.header.sequence_number
         self._rx_sequence_number[channel] = seq  # report sequence number
 
         # * commented out self._dbg in time critical loops for normal operation
-        self._dbg(f" Received Packet *************{new_packet}")
+        # self._dbg(f" Received Packet *************{new_packet}")
 
         return new_packet
