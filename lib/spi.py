@@ -101,6 +101,7 @@ class BNO08X_SPI(BNO08X):
     def _wait_for_int(self):
         """
         Waits for the BNO08x H_INTN pin to assert (go low) using the IRQ flag.
+        This resolves the 10ms starvation issue caused by polling.
         """
         start_time = ticks_ms()
 
@@ -112,7 +113,7 @@ class BNO08X_SPI(BNO08X):
             self._dbg("INT is active low (0) on entry.")
             return
 
-        while ticks_diff(ticks_ms(), start_time) < 3000:  # 3.0 sec
+        while ticks_diff(ticks_ms(), start_time) < 3000:  # 3.0sec
             if self.last_interrupt_us != self.prev_interrupt_us:
                 return
             sleep_us(10)  # 10 us 
@@ -161,15 +162,7 @@ class BNO08X_SPI(BNO08X):
         #  self._dbg(f"_read_packet header: {[hex(x) for x in self._data_buffer[0:4]]}")
 
     def _read_packet(self, wait=True):
-        try:
-            self._read_header(wait=wait)
-        except PacketError:
-            # if wait=False and no packet was available (length 0 or 0xFFFF).
-            raise
-        except RuntimeError as e:
-            if not wait and "Timeout" in str(e):
-                raise PacketError("No packet available")
-            raise
+        self._read_header(wait=wait)
 
         mv = memoryview(self._data_buffer)[:4]
         header_view = uctypes.struct(uctypes.addressof(mv[:4]), _HEADER_STRUCT, uctypes.LITTLE_ENDIAN)
@@ -204,7 +197,7 @@ class BNO08X_SPI(BNO08X):
         self._rx_sequence_number[channel] = seq  # report sequence number
 
         # * commented out self._dbg in time critical loops for normal operation
-        # self._dbg(f" Received Packet *************{new_packet}")
+        self._dbg(f" Received Packet *************{new_packet}")
         
         return new_packet
 
