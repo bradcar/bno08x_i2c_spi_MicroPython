@@ -49,6 +49,7 @@ Cuurrent sensor update periods:
 
 TODO: fix not all reports getting updated, first is clearing flag?
 TODO: decide on call functions, wait for new data, or return what have
+TODO: How to handle unimplemented reports that are sent by sensor? Pass them without error?
 TODO: apply spi optimizations to uart ?  fix UART mis-framing (with quaternions?)
 TODO: test UART with Reset & Interrupt pins
 
@@ -1416,26 +1417,13 @@ class BNO08X:
             # remove self._dbg from time critical operations
             # self._dbg(f"Report: {_REPORTS_DICTIONARY[report_id]}\nData: {sensor_data}, {accuracy=}, {delay_ms=}")
 
-            # host base timestamps has issues of that floats overflow for large ticks and delay's 0.1ms
+            # host-based msec timestamps: ints loose 0.1ms accuracy, 32-bit FP don't have enough significant digits
             # self._sensor_ms = self.last_interrupt_ms - self._last_base_timestamp_us + delay_ms
-            # Better to use ms since first interrupt
+            # Best to use msec in float since first sensor interrupt
             self._sensor_ms = ticks_diff(self.ms_at_interrupt,
                                          self._epoch_start_ms) - self._last_base_timestamp_us * 0.001 + delay_ms
-
-            #            print(f"{self.last_interrupt_ms=}, {self._epoch_start_ms=} {self._last_base_timestamp_us=}")
-            #             print(f"{(self.last_interrupt_ms - self._epoch_start_ms)=}")
-            #             print(f"{delay_ms=}, {self._sensor_ms=}")
-            # use to optimize irq signals
-            # print(f"sensor irq= {(self.last_interrupt_ms - self.prev_interrupt_ms) / 1000.0} ms")
-
             self._report_values[report_id] = sensor_data + (accuracy, self._sensor_ms)
-            try:
-                self._unread_report_count[report_id] += 1
-            except:
-                print(f"_process_report {report_id=} {self._unread_report_count=}")
-                print(f"{report_bytes=}")
-                self._dbg(f"_process_report report_bytes: {[hex(x) for x in report_bytes]}")
-
+            self._unread_report_count[report_id] += 1
             return
 
         #  **** Handle all control reports, here because some are time-critical
