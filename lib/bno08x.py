@@ -622,6 +622,7 @@ class SensorFeature3:
             raise RuntimeError(
                 f"Feature not enabled, use bno.{_REPORTS_DICTIONARY[self.feature_id]}.enable()") from None
 
+
 class SensorFeature4:
     """
     4-tuple reports with optional metadata or optional full.
@@ -693,13 +694,13 @@ class SensorFeature4:
             raise RuntimeError(
                 f"Feature not enabled, use bno.{_REPORTS_DICTIONARY[self.feature_id]}.enable()") from None
 
-
     # class SensorReading5:
     """
     5-tuple reading with optional metadata and optional full.
     FUTURE: process ARVR rotation and full quaternion implementation wth estimated angle
     will have to use different scalar ror estimated angle!
     """
+
 
 class RawSensorFeature:
     """
