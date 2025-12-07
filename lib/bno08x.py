@@ -579,7 +579,7 @@ class Packet:
 
 
 class SensorReading3:
-    """3-tuple reports with optional metadata or optional full."""
+    """ 3-tuple reports with optional metadata or optional full. """
     __slots__ = ("v1", "v2", "v3", "accuracy", "timestamp_ms")
 
     def __init__(self, v1, v2, v3, accuracy, timestamp_ms):
@@ -780,11 +780,11 @@ class BNO08X:
             self._epoch_start_ms = ticks_ms()  # self._sensor_epoch_ms = 0.0  set in __init__
         self.prev_interrupt_us = self.last_interrupt_us
         self.last_interrupt_us = ticks_us()
-        self.ms_at_interrupt = ticks_ms()  
+        self.ms_at_interrupt = ticks_ms()
         self._data_available = True
 
     def reset_sensor(self):
-        """ driver requires hard reset, soft here for future, Reset tx and rx sequence numbers, on reset """
+        """ After power on, sensor seems to requires hard reset, soft reset included here if need after hard reset """
         if self._reset_pin:
             self._hard_reset()
             reset_type = "Hard"
@@ -798,7 +798,7 @@ class BNO08X:
             self._tx_sequence_number = [0, 0, 0, 0, 0, 0]
             self._rx_sequence_number = [0, 0, 0, 0, 0, 0]
             return
-        
+
         if self._reset_mismatch:
             raise RuntimeError("Reset cause mismatch; check reset_pin wiring")
 
@@ -1340,7 +1340,7 @@ class BNO08X:
             self._dbg(f"*** Software Version: {sw_major}.{sw_minor}.{sw_patch}")
             self._dbg(f"\tBuild: {sw_build_number}\n")
 
-            # only first Product ID Response has reset cause, reset_pin should reset_cause=4
+            # only first Product ID Response report has reset cause, reset_pin should reset_cause=4
             if not self._product_id_received:
                 if reset_cause != 4:
                     self._reset_mismatch = True
@@ -1637,42 +1637,15 @@ class BNO08X:
 
     def _soft_reset(self) -> None:
         """
-        Send the 'reset' command packet over special Executable Channel (1) for BNO08X firmware restart.
-        Section 1.3.1 SHTP states: The executable channel (channel=1) allows the host to reset the BNO08X
-        and provide operating mode details. Use write 0x01 – reset, read 0x01 - reset complete.
+        Send the 'reset' command packet on Executable Channel (1), Section 1.3.1 SHTP
         """
         self._dbg(f"*** Soft Reset, Channel={BNO_CHANNEL_EXE} command={_BNO08X_CMD_RESET}, starting...")
         reset_payload = bytearray([_BNO08X_CMD_RESET])
         self._wake_signal()
         self._send_packet(BNO_CHANNEL_EXE, reset_payload)
-        sleep_ms(500)  # seems to be best with 500ms
+        sleep_ms(500)
         start_time = ticks_ms()
-        self._dbg("Process packets, until get Product ID report (0xf8)...")
-
-        # Loop for a short period to process other reports (ex: Timestamp or Command Response)
-        while _elapsed_sec(start_time) < 1.0:
-            try:
-                if not self._data_ready:
-                    sleep_ms(10)
-                    continue
-
-                packet = self._read_packet(wait=True)
-                self._handle_packet(packet)
-                self._dbg(f"Initial packet, Channel {packet.channel_number} (Seq {packet.sequence_number}).")
-
-            except (RuntimeError, PacketError):
-                # expected end-of-burst condition (timeout, no more data)
-                break
-
-            except KeyError as e:
-                self._dbg(f"exit Soft Teset: minor KeyError caught, likely stream end/data access, Error:{e})")
-                break
-
-            except Exception as e:
-                self._dbg(f"FATAL UNEXPECTED ERROR during boot processing: (Type: {type(e)}): {e}. Exiting.")
-                raise  # Re-raise when unexpected and fatal
-
-        self._dbg("End Soft RESET in bno08x.py")
+        self._dbg("*** Soft Reset End, awaiting acknowledgement (0xf8)")
 
     def _wake_signal(self):
         """ Wake is only performaed for spi operation  """
