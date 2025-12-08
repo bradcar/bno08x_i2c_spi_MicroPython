@@ -23,6 +23,13 @@ TODO: The BNO08x datasheet says the host must respond to H_INTN assertion within
 to avoid starvation. While the 3.0s timeout prevents lockup, the sleep_ms(10) in
 the loop means the driver will frequently miss the 10ms deadline when polling.
 
+Ideas for multiple sensors on SPI - untested & this driver may need more code
+Each Sensor needs:
+* its own Chip Select (cs_pin) to each BNO CS pins
+* its own Interrupt (int_pin) to each BNO Int pins
+* they can share the Reset (reset_pin) which must be connected to all the BNO RST pins.
+* they can share the three SPI signals which must be connected to all the BNOs.
+
 """
 from struct import pack_into
 

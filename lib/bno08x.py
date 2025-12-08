@@ -101,7 +101,13 @@ _FRS_READ_REQUEST = const(0xF4)
 _FRS_READ_RESPONSE = const(0xF3)
 _COMMAND_REQUEST = const(0xF2)
 _COMMAND_RESPONSE = const(0xF1)
-_CMD_ADVERTISE = const(0x00)  # Request Advertisement on Chan 0
+
+# Sensor Commands
+_COMMAND_ADVERTISE = const(0x00)  # Request Advertisement command on Chan 0
+_COMMAND_RESET = const(0x01)  # Soft Reset command on Chan 0
+
+# Status Constants
+_COMMAND_STATUS_SUCCESS = 0
 
 # ME / DCD Calibration commands and sub-commands
 _ME_TARE_COMMAND = const(0x03)
@@ -225,10 +231,8 @@ _FEATURE_ENABLE_TIMEOUT = 2.0  # timeout in seconds
 _DEFAULT_TIMEOUT = 2.0  # timeout in seconds
 _CALIBRATION_TIMEOUT = 5.0  # 10 sec
 _TIMEOUT_SHORT_MS = 100  # short sensor knows ME status, just needs to package and send (few ms)
-_BNO08X_CMD_RESET = const(0x01)
 
-# Status Constants
-_COMMAND_STATUS_SUCCESS = 0
+_MAX_PACKET_PROCESS = 10
 
 # Report Frequencies in Hertz
 DEFAULT_REPORT_FREQ = {
@@ -458,10 +462,10 @@ class Packet:
         # ascii = ''.join(chr(b) if 32 <= b <= 126 else f" x{b:02X}" for b in self.data[:length])
         # outstr += f"\nDBG::\t\t ascii: {ascii}\n"
 
-        # On channel 0 BNO_CHANNEL_SHTP_COMMAND, send _CMD_ADVERTISE (0)
+        # On channel 0 BNO_CHANNEL_SHTP_COMMAND, send _COMMAND_ADVERTISE (0)
         # This will provide sensor information that is printed with debug=True
         # Still need to debug this
-        if self.header.data_length == 51 and self.channel_number == BNO_CHANNEL_SHTP_COMMAND and self.report_id == _CMD_ADVERTISE:
+        if self.header.data_length == 51 and self.channel_number == BNO_CHANNEL_SHTP_COMMAND and self.report_id == _COMMAND_ADVERTISE:
             outstr += "\nDBG::\t\t SHTP Advertisement Response (0x00) on channel: SHTP_COMMAND (0x0)\n"
             length = len(self.data)
             index = 1  # skip the first byte of the payload is the Response ID (0x00)
@@ -818,9 +822,9 @@ class BNO08X:
 
         self._dbg("********** End __init__ *************\n")
 
-        # send channel 0 BNO_CHANNEL_SHTP_COMMAND, send _CMD_ADVERTISE (0) to get more sensor info with debug=True
+        # send channel 0 BNO_CHANNEL_SHTP_COMMAND, send _COMMAND_ADVERTISE (0) to get more sensor info with debug=True
         data = bytearray(2)
-        data[0] = _CMD_ADVERTISE
+        data[0] = _COMMAND_ADVERTISE
         data[1] = 0
         self._wake_signal()
         self._send_packet(BNO_CHANNEL_SHTP_COMMAND, data)
@@ -866,7 +870,10 @@ class BNO08X:
 
     @property
     def update_sensors(self):
-        return self._process_available_packets()
+        num_packets = self._process_available_packets()
+        if num_packets > 1:
+            print(f"***update_sensors: #packet={num_packets}")
+        return num_packets
 
     # 3-Tuple Sensor Reports + accuracy + timestamp
     @property
@@ -1120,14 +1127,16 @@ class BNO08X:
 
     #     ############### private/helper methods ###############
 
-    def _process_available_packets(self, max_packets: int = 10) -> bool:
+    def _process_available_packets(self) -> int:
         """
         Fast processing of packets while data-ready is active.
+        
+        TODO: Haven't seen packets processed_count > 1, revisit the logic
         """
         processed_count = 0
         end_time = ticks_ms() + 1  # 1 ms guard
 
-        while self._data_ready and processed_count < max_packets:
+        while self._data_ready and processed_count < _MAX_PACKET_PROCESS:
             if ticks_diff(ticks_ms(), end_time) >= 0:
                 break
             try:
@@ -1142,7 +1151,7 @@ class BNO08X:
             # * commented out self._dbg in time critical loops for normal operation
             # self._dbg(f"Processed {processed_count} packet{'s' if processed_count > 1 else ''}")
             # self._dbg(f"{new_packet=}")
-        return processed_count > 0
+        return processed_count
 
     def _wait_for_packet(self, channel, report_id=None, timeout=0.5):
         """ Wait for a specifc packet to be received on channel, ignore others """
@@ -1524,8 +1533,8 @@ class BNO08X:
 
     def _soft_reset(self) -> None:
         """Send the 'reset' command packet on Executable Channel (1), Section 1.3.1 SHTP"""
-        self._dbg(f"*** Soft Reset, Channel={BNO_CHANNEL_EXE} command={_BNO08X_CMD_RESET}, starting...")
-        reset_payload = bytearray([_BNO08X_CMD_RESET])
+        self._dbg(f"*** Soft Reset, Channel={BNO_CHANNEL_EXE} command={_COMMAND_RESET}, starting...")
+        reset_payload = bytearray([_COMMAND_RESET])
         self._wake_signal()
         self._send_packet(BNO_CHANNEL_EXE, reset_payload)
         sleep_ms(500)
