@@ -175,7 +175,7 @@ class BNO08X_I2C(BNO08X):
         seq = new_packet.header.sequence_number
         self._rx_sequence_number[channel] = seq  # report sequence number
 
-        # * commented out self._dbg in time critical loops for normal operation, add >105ms even with debug=False
+        # * comment out self._dbg for normal operation, adds 105ms delay even with debug=False
         # self._dbg(f" Received Packet *************{new_packet}")
 
         return new_packet

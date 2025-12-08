@@ -43,7 +43,7 @@ Delay
    are used to calculate the sensor sample's actual timestamp.
 
 Current best sensor update periods - BNO086 responded with 2ms update frequeny:
-- spi:   2.1ms (476 Hz)
+- spi:   2.2ms (454 Hz)
 - i2c:   3.3ms (303 Hz)
 - uart:  ?.?ms ( ?? Hz)
 
