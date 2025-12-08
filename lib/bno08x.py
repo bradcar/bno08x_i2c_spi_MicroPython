@@ -42,12 +42,16 @@ Delay
    the delay field may be populated, then delay and the timebase reference
    are used to calculate the sensor sample's actual timestamp.
 
-Current best sensor update periods - BNO086 responded with 2ms update frequeny:
-- spi:   2.2ms (454 Hz)
-- i2c:   3.3ms (303 Hz)
+Current best sensor update periods - BNO086 responded with quaternion with 1ms update frequeny:
+- spi:   1.2ms (833 Hz), we seem to have 0.2ms overhead in processing report
+- i2c:   1.2ms (833 Hz),
 - uart:  ?.?ms ( ?? Hz)
+This is more complicated because if the BNO086 packages multiple sensor reports from the same sensor,
+this driver reports the most recent. When the driver has one report in a package there is a short time
+when it releases it to be reported on. If there are several reports in a package, when control goes back
+the driver reports the last result, so it may appear they are coming at a slower frequency.
 
-TODO: decide on call functions, wait for new data, or return what have
+TODO: determine interaction between bno.update_sensors and sensor reporting
 TODO: How to handle unimplemented reports that are sent by sensor? Pass them without error?
 TODO: apply spi optimizations to uart ?  fix UART mis-framing (with quaternions?)
 TODO: test UART with Reset & Interrupt pins

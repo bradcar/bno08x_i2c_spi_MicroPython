@@ -266,21 +266,21 @@ If the sensor cannot operate at requested period, it may operate faster or slowe
 For example, we've seen a request of 100 Hz and have had the sensor report at 125Hz.
 With multiple reports we've also seen 20 Hz changed to 10 Hz.
 
-| **Feature**             | **Max Frequency (Hz)** | **msec/Report** | **period we've seen**  |
-|-------------------------|------------------------|-----------------|------------------------|
-| Composite Gyro Rotation | 1000? (only 500)       | 1.0 ms          | 1 ms                   |
-| Accelerometer           | 500                    | 2.0 ms          | 2, 4, 8, 16, 32, 64... |
-| Rotation Vector         | 400                    | 2.5 ms          |                        |
-| Gaming Rotation         | 400                    | 2.5 ms          | 5, 10, 20, 40, 50, 60  |
-| Gravity                 | 400                    | 2.5 ms          |                        |
-| Linear Acceleration     | 400                    | 2.5 ms          |                        |
-| Gyroscope               | 400                    | 2.5 ms          | 5, 10, 20, 40, 50, 60  |
-| Magnetometer            | 100                    | 10.0 ms         | 10, 20, 40, 50, 60,    |
-| Geomagnetic Rotation    | 90                     | 11.1 ms         |                        |
-| raw Gyroscope           |                        |                 | 10, 20, 40, 50, 60     |
-| raw Magnetometer        |                        |                 | 50, 60,                |
-| raw Accelerometer       |                        |                 | 32, 64, 96             |
-| (report default)        | 20                     | 50.0 ms         |                        |
+| **Feature**             | ** BNO086 responses to Hz we've seen**                       |
+|-------------------------|--------------------------------------------------------------|
+| Composite Gyro Rotation |                                                              |
+| Quaternion              | 1000, 500, 400, 250, 200, 100, 50, 25, 20, 10, 7.7, 5, 4,... |
+| Gyroscope               | 1000, 500, 400, 200, 100, 50, 25, 20, 10, 7.7, 5, 4,...      |
+| Accelerometer           | 500, 250, 125, 62.5, 31.3, 15.6, 7.8, 5.2,...                |
+| Magnetometer            | 100, 76.9, 50, 25, 20, 10, 7.5, 5, 4, ...                    |
+| Game Quaternion         |                                                              |
+| Gravity                 |                                                              |
+| Linear Acceleration     |                                                              |
+| Geomagnetic Quaternion  |                                                              |
+| raw Gyroscope           |                                                              |
+| raw Magnetometer        |                                                              |
+| raw Accelerometer       |                                                              |
+| (report default)        |                                                              |
 
 There is also a print function (slow) that shows all enabled reports by printing to the console.
 
@@ -294,8 +294,8 @@ The actual sensor period will vary from the attempted period returned by this fu
     period_ms = (1.0 / accelerometer_hertz) * 1000.0
     print(f"Accelerometer: {period_ms:.1f} ms, {accelerometer_hertz:.1f} Hz")
 
-Currently On Pico 2 W, the SPI interface can almost service 2ms reports. 
-The fastest updates we've seen on SPI is 2.7 ms (333Hz), I2C is slower at 3.8ms (263Hz). When you request report frequencies at faster than the microcontroler can service, the period the reporting frequency will slow.
+Currently On Pico 2 W with one quaternions sensor report ever 1ms, the fastest updates we've seen on SPI and I2C is 1.2 ms (833Hz).
+When you request report frequencies at faster than the sensor can service the reporting frequency will slow.
 Try you own experiments and let me know what you find.
 
 Refer to the BNO080_085-Datasheet.pdf (page 50) for Maximum sensor report rates by report type.
