@@ -2,7 +2,11 @@
 #
 # BNO08x MicroPython UART Test
 #
-# UART interface: Test simple sensor report for acceleration
+# UART interface: Test common sensor reports:
+# acceleration, magnetic, gryoscope, quaternion, quaternion.euler
+#
+# Enabling reports at 4 Hz (~0.25 sec)
+# sensor provides frequencies close to what was requested
 
 from time import sleep
 
@@ -14,29 +18,36 @@ from utime import ticks_ms, sleep_us
 
 # UART1-tx=Pin(8) - BNO SCI
 # UART1-rx=Pin(9) - BNO SDA
-int_pin = Pin(14, Pin.IN, Pin.PULL_UP)  # Interrupt, BNO (RST) signals when ready
-reset_pin = Pin(15, Pin.OUT, value=1)  # Reset, tells BNO (INT) to reset
+int_pin = Pin(14, Pin.IN, Pin.PULL_UP)  # BNO sensor (INT)
+reset_pin = Pin(15, Pin.OUT, value=1)  # BNO sensor (RST)
 
-uart = UART(1, baudrate=3_000_000, tx=Pin(8), rx=Pin(9), timeout=500)
+uart = UART(1, baudrate=3000000, tx=Pin(8), rx=Pin(9), timeout=500)
 bno = BNO08X_UART(uart, reset_pin=reset_pin, int_pin=int_pin, debug=False)
 
-# with 0.25s sleep in loop, we request 4Hz reports (~0.25s)
-bno.enable_feature(BNO_REPORT_ACCELEROMETER, 4)
-bno.enable_feature(BNO_REPORT_MAGNETOMETER, 4)
-bno.enable_feature(BNO_REPORT_GYROSCOPE, 4)
-bno.enable_feature(BNO_REPORT_ROTATION_VECTOR, 4)
+print(uart)  # baudrate 3000000 required
+print("Start")
+print("====================================\n")
+
+bno.acceleration.enable(4)
+bno.magnetic.enable(4)
+bno.gyro.enable(4)
+bno.quaternion.enable(4)
 
 # sensor provides frequencies close to what was requested
 bno.print_report_period()
-print("\nBNO08x sensors enabled")
 
+print("\nStart loop:")
 while True:
-    sleep(.25)
-    accel_x, accel_y, accel_z, acc, ts_us = bno.acceleration.full
+    # Required each loop to refresh sensor data
+    bno.update_sensors
+
+    print(f"\nsystem {ticks_ms()=}")
+
+    accel_x, accel_y, accel_z = bno.acceleration
     print(f"\nAcceleration X: {accel_x:+.3f}  Y: {accel_y:+.3f}  Z: {accel_z:+.3f}  m/s²")
 
     mag_x, mag_y, mag_z = bno.magnetic
-    print(f"Magnetometer X: {mag_x:+.3f}  Y: {mag_y:+.3f}  Z: {mag_z:+.3f}  uT ms")
+    print(f"Magnetometer X: {mag_x:+.3f}  Y: {mag_y:+.3f}  Z: {mag_z:+.3f}  uT")
 
     gyro_x, gyro_y, gyro_z = bno.gyro
     print(f"Gyroscope    X: {gyro_x:+.3f}  Y: {gyro_y:+.3f}  Z: {gyro_z:+.3f}  rads/s")

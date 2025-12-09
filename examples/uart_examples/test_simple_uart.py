@@ -20,15 +20,18 @@ reset_pin = Pin(15, Pin.OUT, value=1)  # Reset, tells BNO (INT) to reset
 uart = UART(1, baudrate=3_000_000, tx=Pin(8), rx=Pin(9), timeout=500)
 bno = BNO08X_UART(uart, reset_pin=reset_pin, int_pin=int_pin, debug=False)
 
+print(uart)  # baudrate 3000000 required
 print("Start")
-print("====================================")
+print("====================================\n")
 
-bno.enable_feature(BNO_REPORT_ACCELEROMETER, 250)
+bno.acceleration.enable(20)
 
 bno.print_report_period()
-print("\nBNO08x sensors enabled")
 
 while True:
+    # Required to refresh sensor data
+    bno.update_sensors
+
     accel_x, accel_y, accel_z = bno.acceleration
     print(f"Accel  X: {accel_x:+.3f}  Y: {accel_y:+.3f}  Z: {accel_z:+.3f} m/s²")
     # Notice Gravity acceleration downwards (~9.8 m/s²)

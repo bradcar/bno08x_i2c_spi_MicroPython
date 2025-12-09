@@ -50,9 +50,6 @@ class BNO08X_UART(BNO08X):
     """
 
     def __init__(self, uart, reset_pin=None, int_pin=None, debug=False):
-        if uart is None:
-            raise RuntimeError("UART bus object (uart) must be provided for BNO08X_UART operation.")
-      
         self._uart = uart
         self._debug = debug
         _interface = "UART"
@@ -60,17 +57,14 @@ class BNO08X_UART(BNO08X):
         if int_pin is None:
             raise RuntimeError("int_pin is required for UART operation")
         if not isinstance(int_pin, Pin):
-            raise TypeError(f"int_pin must be a Pin object, not {type(int_pin)}")
+            raise TypeError("int_pin must be a Pin object, not {type(int_pin)}")
         self._int = int_pin
-        self._int.init(Pin.IN, Pin.PULL_UP) # guarantee int_pin is properly set up
 
         if reset_pin is not None and not isinstance(reset_pin, Pin):
             raise TypeError(f"reset_pin (RST) must be a Pin object or None, not {type(reset_pin)}")
         self._reset = reset_pin
 
-        # TODO add check for UART functioning at some level
-
-        # UART can not use cs_pin or wake_pin
+        # wake_pin must be NONE!  wake_pin/PS0 = 0 (gnd)
         super().__init__(_interface, reset_pin=reset_pin, int_pin=int_pin, cs_pin=None, wake_pin=None, debug=debug)
 
     def _send_packet(self, channel, data):
@@ -113,84 +107,90 @@ class BNO08X_UART(BNO08X):
                 b ^= 0x20
             buf[idx] = b
 
-    def _read_header(self):
-        """Reads the first 4 bytes available as a header"""
-        data = None
-        start_time = ticks_ms()
-        while True:
-            data = self._uart.read(1)
-            if not data:
-                if _elapsed_sec(start_time) > 5.0:
-                    print("ERROR 5 sec timeout, Check UART pins & sensor wiring (host TX to SCLK, host RX to SDA)")
-                    raise RuntimeError("UART read timeout while waiting for 0x7E start byte.")
-                continue
-            b = data[0]
-            if b == 0x7E:
-                break
-
-        # read protocol id
-        data = self._uart.read(1)
-        if data and data[0] == 0x7E:  # second 0x7e
-            data = self._uart.read(1)
-        if not data or data[0] != 0x01:
-            raise RuntimeError("Unhandled UART control SHTP protocol")
-
-        self._read_into(self._data_buffer, start=0, end=4)
-# -----
 #     def _read_header(self):
-#         """
-#         Reads the first 4 bytes available as a header.
-#         Waits for the H_INTN interrupt flag before proceeding.
-#         """
+#         """Reads the first 4 bytes available as a header"""
+#         data = None
 #         start_time = ticks_ms()
-#         TIMEOUT_SEC = 5.0
-#         
-#         print(f"{self._data_available=}, {self._uart.any()=}")
-# 
-#         while not self._data_available:
-#             if _elapsed_sec(start_time) > TIMEOUT_SEC:
-#                 print("ERROR 5 sec timeout, Check UART pins & sensor wiring (host TX to SCLK, host RX to SDA)")
-#                 raise RuntimeError("int_pin read timeout while waiting for BNO08X data.")
-#             sleep_ms(1) # Yield control briefly to avoid busy-waiting
-# 
-#         self._data_available = False 
-# 
-#         start_time_read = ticks_ms()
 #         while True:
 #             data = self._uart.read(1)
 #             if not data:
-#                 if _elapsed_sec(start_time_read) > 0.1: # Short, aggressive read timeout
-#                     raise RuntimeError("Timeout waiting for 0x7E start byte after interrupt.")
+#                 if _elapsed_sec(start_time) > 5.0:
+#                     print("ERROR 5 sec timeout, Check UART pins & sensor wiring (host TX to SCLK, host RX to SDA)")
+#                     raise RuntimeError("UART read timeout while waiting for 0x7E start byte.")
 #                 continue
-#                 
 #             b = data[0]
 #             if b == 0x7E:
 #                 break
 # 
-#         # 3. Read the SHTP Protocol ID (0x01)
+#         # read protocol id
 #         data = self._uart.read(1)
-#         print(f" SHTP protocol {data=}")
-#         if data and data[0] == 0x7E:  # Handles the case where the start byte was skipped/missed
-#             data = self._uart.read(1) # Read the actual Protocol ID
-#             
+#         if data and data[0] == 0x7E:  # second 0x7e
+#             data = self._uart.read(1)
 #         if not data or data[0] != 0x01:
-#             raise RuntimeError("Unhandled UART control SHTP protocol ID.")
+#             raise RuntimeError("Unhandled UART control SHTP protocol")
 # 
-#         start_time_read = ticks_ms()
-#         while self._uart.any() < 4:
-#             if _elapsed_sec(start_time_read) > 0.1:
-#                 raise RuntimeError("Timeout waiting for 4-byte SHTP header data.")
-#             sleep_us(100) # Yield briefly
-#        
 #         self._read_into(self._data_buffer, start=0, end=4)
-#         print(f"{self._data_buffer[:4]=}")
+# -----
+    def _read_header(self):
+        """
+        Reads the first 4 bytes available as a header.
+        Waits for the H_INTN interrupt flag before proceeding.
+        """
+        start_time = ticks_ms()
+        TIMEOUT_SEC = 5.0
+        
+        #print(f"{self._data_available=}, {self._uart.any()=}")
+
+        while not self._data_available:
+            if _elapsed_sec(start_time) > TIMEOUT_SEC:
+                print("ERROR 5 sec timeout, Check UART pins & sensor wiring (host TX to SCLK, host RX to SDA)")
+                raise RuntimeError("int_pin read timeout while waiting for BNO08X data.")
+            sleep_ms(1) # Yield control briefly to avoid busy-waiting
+
+        self._data_available = False 
+
+        start_time_read = ticks_ms()
+        while True:
+            data = self._uart.read(1)
+            if not data:
+                if _elapsed_sec(start_time_read) > 0.1: # Short, aggressive read timeout
+                    raise RuntimeError("Timeout waiting for 0x7E start byte after interrupt.")
+                continue
+                
+            b = data[0]
+            if b == 0x7E:
+                break
+
+        # 3. Read the SHTP Protocol ID (0x01)
+        data = self._uart.read(1)
+        
+        #print(f" SHTP protocol {data=}")
+        
+        if data and data[0] == 0x7E:  # Handles the case where the start byte was skipped/missed
+            data = self._uart.read(1) # Read the actual Protocol ID
+            
+        if not data or data[0] != 0x01:
+            raise RuntimeError("Unhandled UART control SHTP protocol ID.")
+
+        start_time_read = ticks_ms()
+        while self._uart.any() < 4:
+            if _elapsed_sec(start_time_read) > 0.1:
+                raise RuntimeError("Timeout waiting for 4-byte SHTP header data.")
+            sleep_us(100) # Yield briefly
+       
+        self._read_into(self._data_buffer, start=0, end=4)
+        
+        #print(f"{self._data_buffer[:4]=}")
         
 
     def _read_packet(self, wait=None):
         self._read_header()
         header = Packet.header_from_buffer(self._data_buffer)
         packet_byte_count = header.packet_byte_count
+        channel = header.channel_number
+        sequence_number = header.sequence_number
 
+        self._rx_sequence_number[channel] = sequence_number
         if packet_byte_count == 0:
             raise PacketError("No packet available")
 
@@ -208,13 +208,27 @@ class BNO08X_UART(BNO08X):
 
         if b != 0x7E:
             raise RuntimeError(f"_read_packet: Didn't find packet end (Received {hex(b)})")
-
+    
         new_packet = Packet(self._data_buffer)
-        self._dbg(f"{new_packet=}")
-        channel = new_packet.header.channel_number
         seq = new_packet.header.sequence_number
-        self._rx_sequence_number[channel] = seq
+        self._rx_sequence_number[channel] = seq  # report sequence number
+
+        # * comment out self._dbg for normal operation, adds 8ms delay even with debug=False
+        self._dbg(f" Received Packet *************{new_packet}")
+
         return new_packet
+    
+
+    @property
+    def _data_ready(self):
+        """
+        UART variant also has uart.any() fallback
+        """
+        if self._data_available:
+            return True
+        
+#         self._dbg(f"_data_ready: {self._uart.any()}")
+#         return self._uart.any() >= 4
 
     def _soft_reset(self):
         """
@@ -271,7 +285,7 @@ class BNO08X_UART(BNO08X):
 
         self._dbg("End Soft RESET in uart.py")
 
-    def _hard_reset(self) -> None:
+    def reset_sensor(self) -> None:
         """
         Hardware reset the sensor to an initial state
         UART handles SHTP protocol and must evaluate command packet response
@@ -279,12 +293,13 @@ class BNO08X_UART(BNO08X):
         if not self._reset_pin:
             return
 
-        self._dbg("*** Hard Reset in UART, starting...")
+        self._dbg("*** UART Hard Reset starting...")
         self._reset_pin.value(1)
         sleep_ms(10)
         self._reset_pin.value(0)
-        sleep_us(1)  # data sheet 6.5.3 Startup timing says only 10ns needed
+        sleep_us(10)  # sleep_us(1), data sheet say only 10ns required,
         self._reset_pin.value(1)
+        sleep_ms(500)  # orig was 10ms, datasheet implies 94 ms required
 
         # flush any uart data leftover from the previous run before the reset
         while self._uart.any():
@@ -294,7 +309,8 @@ class BNO08X_UART(BNO08X):
         sleep_ms(120)  # data sheet 6.5.3 Startup timing implies 94 ms needed
 
         start_time = ticks_ms()
-        self._dbg("Process initial packets, until get Product ID report (0xf8)...")
+        self._dbg("*** Hard Reset End in UART, awaiting acknowledgement (0xf8)")
+
 
         # Loop for a short period to process reports (like Timestamp or Command Response)
         while _elapsed_sec(start_time) < 1.0:
@@ -305,6 +321,7 @@ class BNO08X_UART(BNO08X):
                     continue
 
                 packet = self._read_packet()
+                print(f"hard_reset: packet={packet}")
                 self._handle_packet(packet)
                 self._dbg(f"Initial packet, Channel {packet.channel_number} (Seq {packet.header.sequence_number}).")
 
