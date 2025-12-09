@@ -69,14 +69,9 @@ Primary sensor report constants:
     bno.stability_classifier.enable()
     bno.activity_classifier.enable()
 
-BNO08x documentation uses the words "ROTATION_VECTOR", and we honor that in several of the above constants. 
-Most people refer to these as quaternions, which is easier to understand in code.
-In this library, we use bno.quaternion and enable it with "BNO_REPORT_ROTATION_VECTOR".
-Likewise, when bno.game_quaternion is used, please enable it with "BNO_REPORT_GAME_ROTATION_VECTOR".
-
 ## Getting the sensor results:
 
-Sensors values can be read after you perform a bno.update_sensors for example:
+Sensors values can be read after you perform a bno.update_sensors:
 
     bno.update_sensors
     accel_x, accel_y, accel_z = bno.acceleration
@@ -86,12 +81,13 @@ Roll, tilt, and yaw are obtained using quaternion with the modifier euler:
     bno.update_sensors
     roll, tilt, yaw = bno.quaternion.euler
 
-You can use one update_sensors to get the current update from all sensors and then perform multiple reads.
+You can use one update_sensors to get the current update from all sensors and then the various sensors.
 
-The sensor data and metadata for each report can be accessed at the same time using ".full".
+Beyond the sensor data, each update also has metadata with the timestamp of the reading and its accuracty. 
+The sensor data and metadata for each report can be accessed at the same time using the modifier ".full".
 In this way, the accuracy and the microsecond-accurate timestamp of a particular report is returned at the same time.
 The timestamp_ms is milliseconds since sensor startup. 
-You can calculate the millisecond difference between ticks_ms() and the bno start time by using bno.bno_start_diff.
+You can calculate the millisecond difference between ticks_ms() and the bno08x start time by using bno.bno_start_diff.
 Understanding timestamps is recommended for high-frequency applications (>5Hz).
 
     bno.update_sensors
@@ -131,25 +127,28 @@ The examples directory shows the use of the following sensor reports. Each of th
     stability_str = bno.stability_classifier    # string of stability classification returned
     activity_str, conf = bno.activity_classifier    # string of activity classification, and integer %conf returned
 
-The following can be used to tare the sensor
+The following can be used as the basis to tare the sensor (details  in references):
 -   0: quaternion
 -   1: game_quaternion
 -   2: geomagnetic_quaternion
+Typically you want to tare on all axis and will specify this with 0x07.
 
 
-    bno.tare(0x07, 0)
+    basis = 0 # quaternions
+    axies = 0x07  # all axies
+    bno.tare(axies,basis)
     bno.save_tare_data
 
-One can manually calibrate the sensor:
+One can manually calibrate the sensor (details  in references):
 
     bno.begin_calibration 
     bno.calibration_status  # wait for sensor to be ready to calibrate
     # loop to test acceleration, magnetic, gyro  - see examples/test_calibration.py
     bno.save_calibration_data
 
-To set the sensor board orientation you can use  (if mounting board vertically, or if you want a different part of the sensor to be "forward")
+tare_reorientation can be used to set the sensor board orientation, for example if are mounting board vertically, or if you want a different part of the sensor to be "forward".
 
-    i, j, k, real = bno.quaternion              # rotation 4-tuple of i,j,k,real float returned
+    i, j, k, real = bno.quaternion   # rotation 4-tuple of i,j,k,real float returned
     # perform calcuations to transform tuple for your direction to tare on, then set, and save (see references below)
     bno.tare_reorientation(i, j, k, real)
     bno.save_tare_data
@@ -224,8 +223,7 @@ Optional for SPI:
 
 This driver will reset the spi to have polarity=1 and phase=1 as required by the bno08x.
 
-## UART Setup -- TODO  UART IN DEBUG !!! TODO  UART IN DEBUG !!! TODO  UART IN DEBUG !!!
-WARNING - WARNING
+## UART Setup -- WARNING - WARNING UART IN DEBUG !!!
 
  UART must be set to baudrate=3_000_000 (only).
 
@@ -251,8 +249,6 @@ PS0 and PS1 are the host interface protocol selection pins, therefore UART can n
 
 1. must clear i2c jumper when using SPI or UART (https://docs.sparkfun.com/SparkFun_VR_IMU_Breakout_BNO086_QWIIC/assets/board_files/SparkFun_VR_IMU_Breakout_BNO086_QWIIC_Schematic_v10.pdf)
 2. must have solder blob ONLY on SP1, must NOT have Wake pin connect to a pin.
-
-Note: Baudrate must be defined in UART call and not BNO08X_UART.
 
 ## Details on Report Frequencies
 
