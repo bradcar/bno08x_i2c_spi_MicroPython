@@ -24,7 +24,7 @@ bno = BNO08X_SPI(spi, cs_pin, reset_pin, int_pin, wake_pin, debug=False)
 
 print(spi)
 print("Start")
-print("===========================")
+print("===========================\n")
 
 bno.quaternion.enable(100)
 
