@@ -84,8 +84,7 @@ class BNO08X_UART(BNO08X):
 
     def _wait_for_int(self):
         """
-        Waits for the BNO08x int_pin to assert (go low) by monitoring 
-        the change in the microsecond timestamp set by the ISR.
+        Waits for BNO08x int_pin to assert (go low) by monitoring microsecond timestamp set by the Interrupt.
         """
         initial_int_time = self.last_interrupt_us
         start_time = ticks_ms()
