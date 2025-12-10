@@ -71,7 +71,6 @@ class BNO08X_SPI(BNO08X):
         cs_pin: SPI CS pin to signal reads or writes
         reset_pin: optionl reset to BNO08x
         int_pin=None: optional int_pin to get signal when BNO08x is ready
-        baudrate: (default 1 MHz, max 3 MHz)
         debug: prints very detailed logs, primarily for driver debug & development.
     """
 

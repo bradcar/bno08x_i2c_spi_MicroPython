@@ -38,10 +38,25 @@ In UART mode, the BNO08X sends an advertisement message when it is ready to comm
 
 from struct import pack_into
 
-from utime import sleep_ms, sleep_us, ticks_ms
+import uctypes
 from machine import Pin
+from utime import sleep_ms, sleep_us, ticks_ms, ticks_diff
 
-from bno08x import BNO08X, Packet, PacketError, DATA_BUFFER_SIZE, _elapsed_sec
+from bno08x import BNO08X, Packet, PacketError
+
+# TODO Need to find definitive value
+# 272 bytes shown in ll-test GitHub
+# 256 returned by Advertisement debug=True, TAG_MAX_CARGO_PLUS_HEADER_READ
+#     BUT, then Arduino code subtracts 4, which is header size?
+# 282: x01 x1a   spi header+advert
+# 284: x01 x1c   i2c header+advert
+_SHTP_MAX_CARGO_PACKET_BYTES = 284
+
+_HEADER_STRUCT = {
+    "packet_bytes": (uctypes.UINT16 | 0),
+    "channel": (uctypes.UINT8 | 2),
+    "sequence": (uctypes.UINT8 | 3),
+}
 
 
 class BNO08X_UART(BNO08X):
@@ -53,190 +68,198 @@ class BNO08X_UART(BNO08X):
         self._uart = uart
         self._debug = debug
         _interface = "UART"
-        
+
         if int_pin is None:
             raise RuntimeError("int_pin is required for UART operation")
         if not isinstance(int_pin, Pin):
             raise TypeError("int_pin must be a Pin object, not {type(int_pin)}")
-        self._int = int_pin
+        self._int_pin = int_pin
 
         if reset_pin is not None and not isinstance(reset_pin, Pin):
             raise TypeError(f"reset_pin (RST) must be a Pin object or None, not {type(reset_pin)}")
-        self._reset = reset_pin
+        self._reset_pin = reset_pin
 
         # wake_pin must be NONE!  wake_pin/PS0 = 0 (gnd)
         super().__init__(_interface, reset_pin=reset_pin, int_pin=int_pin, cs_pin=None, wake_pin=None, debug=debug)
 
+    def _wait_for_int(self):
+        """
+        Waits for the BNO08x int_pin to assert (go low) by monitoring 
+        the change in the microsecond timestamp set by the ISR.
+        """
+        initial_int_time = self.last_interrupt_us
+        start_time = ticks_ms()
+
+        # Check if the interrupt is already active (was missed)
+        if self._int_pin.value() == 0:
+            # * comment out self._dbg for normal operation, adds delay even with debug=False
+            # self._dbg("int_piun is active low (0) on entry.")
+            return 
+        
+        # Poll the interrupt timestamp for a change
+        while ticks_diff(ticks_ms(), start_time) < 10: 
+            if self.last_interrupt_us != initial_int_time:
+                return 
+            sleep_us(100)
+        
+        raise RuntimeError(f"_wait_for_int timeout ({ticks_diff(ticks_ms(), start_time)}ms) waiting for int_pin")
+
     def _send_packet(self, channel, data):
-        """
-        1.2.3.1 UART operation states:
-        "Bytes sent from the host to the BNO08X must be separated by at least 100us."
-        """
+        """ 1.2.3.1 UART Operation:"Bytes sent to the BNO08X must be separated by at least 100us."""
+        seq = self._tx_sequence_number[channel]
         data_length = len(data)
         write_length = data_length + 4
         byte_buffer = bytearray(1)
 
         pack_into("<H", self._data_buffer, 0, write_length)
         self._data_buffer[2] = channel
-        self._data_buffer[3] = self._tx_sequence_number[channel]
+        self._data_buffer[3] = seq
         self._data_buffer[4: 4 + data_length] = data
 
-        self._uart.write(b"\x7e")  # start byte
-        sleep_us(100)
-        self._uart.write(b"\x01")  # SHTP byte
-        sleep_us(100)
-        
-        # TODO Verify this works
         if self._debug:
             packet = Packet(self._data_buffer)
             self._dbg(f"  Sending Packet *************{packet}")
 
-        # writing byte-by-byte with the specified delay
+        # ---start--- UART Send packet - handle SHTP protocol
+        self._uart.write(b"\x7e")  # start byte
+        sleep_us(100)
+        self._uart.write(b"\x01")  # SHTP byte
+        sleep_us(100)
+
+        # Scan outgoing packet for UART reserved bytes (0x7e or 0x7d), if so escape it
+        outgoing_bytes = []
         for b in self._data_buffer[0:write_length]:
+            if b == 0x7e or b == 0x7d:
+                outgoing_bytes.append(0x7D)  # add UART Control Escape
+                outgoing_bytes.append(b ^ 0x20)  # XOR with 0x20
+            else:
+                outgoing_bytes.append(b)
+
+        # Write all bytes with 100us delay
+        byte_buffer = bytearray(1)
+        for b in outgoing_bytes:
             byte_buffer[0] = b
             self._uart.write(byte_buffer)
             sleep_us(100)
-        self._uart.write(b"\x7e")  # end byte
 
-        self._tx_sequence_number[channel] = (self._tx_sequence_number[channel] + 1) % 256
+        # UART end byte
+        self._uart.write(b"\x7e")
+        sleep_us(100)
+        # ----end---- UART Send packet - handle SHTP protocol: 
+
+        self._tx_sequence_number[channel] = (seq + 1) % 256
         return self._tx_sequence_number[channel]
 
     def _read_into(self, buf, start, end):
+        """used to read UART data for all reads """
         for idx in range(start, end):
             data = self._uart.read(1)
-            b = data[0]
+            try:
+                b = data[0]
+            except TypeError as e:
+                raise RuntimeError(f"_read_into Timeout reading data byte {idx}") from e
+
             if b == 0x7D:  # control escape
                 data = self._uart.read(1)
-                b = data[0]
-                b ^= 0x20
+                try:
+                    b = data[0]
+                except TypeError as e:
+                    raise RuntimeError(f"_read_into Timeout reading escape sequence byte {idx}") from e
+                b ^= 0x20  # control escape
+
             buf[idx] = b
 
-#     def _read_header(self):
-#         """Reads the first 4 bytes available as a header"""
-#         data = None
-#         start_time = ticks_ms()
-#         while True:
-#             data = self._uart.read(1)
-#             if not data:
-#                 if _elapsed_sec(start_time) > 5.0:
-#                     print("ERROR 5 sec timeout, Check UART pins & sensor wiring (host TX to SCLK, host RX to SDA)")
-#                     raise RuntimeError("UART read timeout while waiting for 0x7E start byte.")
-#                 continue
-#             b = data[0]
-#             if b == 0x7E:
-#                 break
-# 
-#         # read protocol id
-#         data = self._uart.read(1)
-#         if data and data[0] == 0x7E:  # second 0x7e
-#             data = self._uart.read(1)
-#         if not data or data[0] != 0x01:
-#             raise RuntimeError("Unhandled UART control SHTP protocol")
-# 
-#         self._read_into(self._data_buffer, start=0, end=4)
-# -----
-    def _read_header(self):
-        """
-        Reads the first 4 bytes available as a header.
-        Waits for the H_INTN interrupt flag before proceeding.
-        """
-        start_time = ticks_ms()
-        TIMEOUT_SEC = 5.0
-        
-        #print(f"{self._data_available=}, {self._uart.any()=}")
+    def _read_packet(self, wait=None):
+        wait = bool(wait)  # both wait=None wait=False are non-blocking
+        if wait:
+            if self._uart.any() == 0:
+                self._wait_for_int() # Will raise a timeout if no new interrupt after 10ms
 
-        while not self._data_available:
-            if _elapsed_sec(start_time) > TIMEOUT_SEC:
-                print("ERROR 5 sec timeout, Check UART pins & sensor wiring (host TX to SCLK, host RX to SDA)")
-                raise RuntimeError("int_pin read timeout while waiting for BNO08X data.")
-            sleep_ms(1) # Yield control briefly to avoid busy-waiting
+        # Buffer for Read 4-byte SHTP header and process
+        header_mv = memoryview(self._data_buffer)[:4]
 
-        self._data_available = False 
-
+        # ---start--- UART Header read - handle SHTP protocol: 
+        # UART wait till read 0x7E start byte
         start_time_read = ticks_ms()
         while True:
             data = self._uart.read(1)
             if not data:
-                if _elapsed_sec(start_time_read) > 0.1: # Short, aggressive read timeout
-                    raise RuntimeError("Timeout waiting for 0x7E start byte after interrupt.")
+                if ticks_diff(ticks_ms(), start_time_read) > 100:
+                    return None
                 continue
-                
             b = data[0]
             if b == 0x7E:
                 break
 
         # Read the SHTP Protocol ID (0x01)
         data = self._uart.read(1)
-        
-        #print(f" SHTP protocol {data=}")
-        
-        if data and data[0] == 0x7E:  # Handles the case where the start byte was skipped/missed
-            data = self._uart.read(1) # Read the actual Protocol ID
-            
         if not data or data[0] != 0x01:
-            raise RuntimeError("Unhandled UART control SHTP protocol ID.")
+            raise RuntimeError(f"_read_packet header: Didn't find SHTP Protocol ID 0x01, saw {hex(data[0])}")
 
-        start_time_read = ticks_ms()
-        while self._uart.any() < 4:
-            if _elapsed_sec(start_time_read) > 0.1:
-                raise RuntimeError("Timeout waiting for 4-byte SHTP header data.")
-            sleep_us(100) # Yield briefly
-       
-        self._read_into(self._data_buffer, start=0, end=4)
-        
-        #print(f"{self._data_buffer[:4]=}")
-        
+        # Read header bytes
+        self._read_into(header_mv, start=0, end=4)
+        # ----end---- UART Header read - handle SHTP protocol: 
 
-    def _read_packet(self, wait=None):
-        self._read_header()
-        header = Packet.header_from_buffer(self._data_buffer)
-        raw_packet_bytes = header.packet_byte_count
-        channel = header.channel_number
-        sequence_number = header.sequence_number
-        self._rx_sequence_number[channel] = sequence_number
+        header_view = uctypes.struct(uctypes.addressof(self._data_buffer), _HEADER_STRUCT, uctypes.LITTLE_ENDIAN)
+        raw_packet_bytes = header_view.packet_bytes
+        channel = header_view.channel
+        seq = header_view.sequence
+        self._rx_sequence_number[channel] = seq  # SH2 Sequence number
         
+        # * comment out self._dbg for normal operation, adds delay even with debug=False
+        # self._dbg(f" _read_packet Header {hex(raw_packet_bytes)}, {channel=}, {seq=}")
+
         # Check for 0 length (to skip) or invalid lengths (bad sensor data, 0xFFFF)
         if raw_packet_bytes == 0:
             self._dbg("_read_packet: packet_bytes=0, returning None.")
             return None
         if raw_packet_bytes == 0xFFFF:
             raise PacketError(f"Invalid SHTP header length detected: {hex(raw_packet_bytes)}")
-        
+
         packet_bytes = raw_packet_bytes & 0x7FFF
 
-        if packet_bytes > DATA_BUFFER_SIZE:
+        if packet_bytes > len(self._data_buffer):
             self._data_buffer = bytearray(packet_bytes)
 
-        # skip 4 header bytes since they've already been read
-        self._read_into(self._data_buffer, start=4, end=packet_bytes)
+        if packet_bytes <= _SHTP_MAX_CARGO_PACKET_BYTES:
+            mv = memoryview(self._data_buffer)[:packet_bytes]
 
-        data = self._uart.read(1)
-        if not data:
-            raise RuntimeError("Timeout while waiting for packet end")
+            # ---start--- UART Payload read
+            self._read_into(mv, start=4, end=packet_bytes)
 
-        b = data[0]
+            data = self._uart.read(1)
+            if not data:
+                raise RuntimeError("_read_packet payload: Timeout while waiting for packet end")
 
-        if b != 0x7E:
-            raise RuntimeError(f"_read_packet: Didn't find packet end (Received {hex(b)})")
-    
-        new_packet = Packet(self._data_buffer)
+            b = data[0]
+            if b != 0x7E:
+                raise RuntimeError(f"_read_packet payload: Didn't find UART end 0x7e, saw {hex(b)}")
+            # ----end---- UART Payload read 
+
+        else:
+            print(f"FRAGMENTED PACKET - {packet_bytes=} and {_SHTP_MAX_CARGO_PACKET_BYTES=}")
+            print(f"***** NEED to implement multi-packet reads, erasing header")
+            print(f"* Have yet to see packet_bytes > 193 bytes, algorithm sketched out")
+            print(f"* Ceva and others have no clear documentation of the max cargo bytes value")
+            print(f"{self._data_buffer}")
+            raise NotImplementedError("The multi-packet reads are NOT unimplemented. TODO")
+
+            # at startup some first packets have continuation, likely missed the packet before
+            # when the payload bytes are longer than the xxxxx then we must processess the next packet
+            # this should have continuation bit set
+            continuation = bool(raw_packet_bytes & 0x8000)
+            if continuation:
+                self._dbg(f"CONTINUATION in _read_packet: {packet_bytes=}")
+                # raise PacketError("read partial packet")
+
+        new_packet = Packet(self._data_buffer[:packet_bytes])
         seq = new_packet.header.sequence_number
         self._rx_sequence_number[channel] = seq  # report sequence number
 
-        # * comment out self._dbg for normal operation, adds 8ms delay even with debug=False
-        self._dbg(f" Received Packet *************{new_packet}")
+        # * comment out self._dbg for normal operation, adds 105ms delay even with debug=False
+        # self._dbg(f" Received Packet *************{new_packet}")
 
         return new_packet
-    
-
-    @property
-    def _data_ready(self):
-        """UART variant also has uart.any() fallback"""
-        if self._data_available:
-            return True
-        
-#         self._dbg(f"_data_ready: {self._uart.any()}")
-#         return self._uart.any() >= 4
 
     def _soft_reset(self):
         """
@@ -260,42 +283,9 @@ class BNO08X_UART(BNO08X):
         self._dbg("*** Cleared stale UART buffer during reset")
         sleep_ms(500)
 
-        start_time = ticks_ms()
-        self._dbg("Process initial packets, until get Product ID report (0xf8)...")
-
-        # Loop for a short period to process reports (like Timestamp or Command Response)
-        while _elapsed_sec(start_time) < 1.0:
-            try:
-                # Check for enough bytes for a header (4) to prevent blocking indefinitely
-                if not self._data_ready:
-                    sleep_ms(10)
-                    continue
-
-                packet = self._read_packet()
-                self._handle_packet(packet)
-                self._dbg(f"Initial packet, Channel {packet.channel_number} (Seq {packet.header.sequence_number}).")
-
-            except (RuntimeError, PacketError):
-                # expected end-of-burst condition (timeout, no more data)
-                break
-
-            except KeyError as e:
-                self._dbg(f"exit Soft Teset: minor KeyError caught, likely stream end/data access, Error:{e})")
-                break
-
-            except Exception as e:
-                self._dbg(f"FATAL UNEXPECTED ERROR during boot processing: (Type: {type(e)}): {e}. Exiting.")
-                raise  # Re-raise when unexpected and fatal
-
-        # Reset tx and rx sequence numbers, BNO08X initially sets sequence numbers to 0 after boot.
-        self._tx_sequence_number = [0, 0, 0, 0, 0, 0]
-        self._rx_sequence_number = [0, 0, 0, 0, 0, 0]
-
         self._dbg("End Soft RESET in uart.py")
 
-
-    #TODO Turn back to _hard_reset, then debug check_id with uart
-    def reset_sensor(self) -> None:
+    def _hard_reset(self) -> None:
         """
         Hardware reset the sensor to an initial state
         UART handles SHTP protocol and must evaluate command packet response
@@ -303,55 +293,34 @@ class BNO08X_UART(BNO08X):
         if not self._reset_pin:
             return
 
+        while self._uart.any():
+            self._uart.read(self._uart.any())
+        self._dbg("*** UART Cleared stale UART buffer before reset")
+
         self._dbg("*** UART Hard Reset starting...")
         self._reset_pin.value(1)
         sleep_ms(10)
         self._reset_pin.value(0)
         sleep_us(10)  # sleep_us(1), data sheet say only 10ns required,
         self._reset_pin.value(1)
-        sleep_ms(500)  # orig was 10ms, datasheet implies 94 ms required
+        sleep_ms(300)  # data sheet 6.5.3 Startup timing implies 94 ms needed
 
         # flush any uart data leftover from the previous run before the reset
         while self._uart.any():
             self._uart.read(self._uart.any())
-        self._dbg("*** Cleared stale UART buffer during reset")
+        self._dbg("*** UART Cleared stale UART buffer after reset")
 
-        sleep_ms(120)  # data sheet 6.5.3 Startup timing implies 94 ms needed
-
-        start_time = ticks_ms()
         self._dbg("*** Hard Reset End in UART, awaiting acknowledgement (0xf8)")
 
+    def _wake_signal(self):
+        """UART has no wake signal, when called in the base class this is a noop"""
+        pass
 
-        # Loop for a short period to process reports (like Timestamp or Command Response)
-        while _elapsed_sec(start_time) < 1.0:
-            try:
-                # Check for enough bytes for a header (4) to prevent blocking indefinitely
-                if not self._data_ready:
-                    sleep_ms(10)
-                    continue
+    @property
+    def _data_ready(self):
+        """UART variant also has uart.any() fallback"""
+        #         if self._data_available:
+        #             return True
 
-                packet = self._read_packet()
-                print(f"hard_reset: packet={packet}")
-                self._handle_packet(packet)
-                self._dbg(f"Initial packet, Channel {packet.channel_number} (Seq {packet.header.sequence_number}).")
-
-            except (RuntimeError, PacketError):
-                # expected end-of-burst condition (timeout, no more data)
-                break
-
-            except KeyError as e:
-                self._dbg(f"exit hard reset: minor KeyError caught, likely stream end/data access, Error:{e})")
-                break
-
-            except Exception as e:
-                self._dbg(f"FATAL UNEXPECTED ERROR during boot processing: (Type: {type(e)}): {e}. Exiting.")
-                raise  # Re-raise when unexpected and fatal
-
-        # Reset tx and rx sequence numbers, BNO08X initially sets sequence numbers to 0 after boot.
-        self._tx_sequence_number = [0, 0, 0, 0, 0, 0]
-        self._rx_sequence_number = [0, 0, 0, 0, 0, 0]
-
- 
-        self._dbg("***UART reset_sensor(nee _hard_reset) doesn't ACK 0xf8 reports received")
-        self._dbg("*** Hard Reset acknowledged in uart.py, sequence numbers reset")
-        # Control returns to bno08x.py:reset_sensor which calls _check_id()
+        #self._dbg(f"_data_ready: {self._uart.any()}")
+        return self._uart.any() >= 4

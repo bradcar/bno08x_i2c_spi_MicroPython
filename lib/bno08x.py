@@ -543,6 +543,11 @@ class Packet:
         """The packet channel"""
         return self.header.channel_number
 
+    @property
+    def byte_count(self) -> int:
+        """The packet channel"""
+        return self.header.packet_byte_count
+
     @classmethod
     def header_from_buffer(cls, packet_bytes: bytearray) -> PacketHeader:
         """Creates a `PacketHeader` object from a given buffer"""
@@ -846,9 +851,12 @@ class BNO08X:
         self.last_interrupt_us = ticks_us()
         self.ms_at_interrupt = ticks_ms()
         self._data_available = True
+        # * comment out self._dbg for normal operation, adds 105ms delay even with debug=False
+        # self._dbg(f"INTERRUPT: at {self.last_interrupt_us=}, uart.any()={self._uart.any()}")
+
 
     def reset_sensor(self):
-        """ After power on, sensor seems to require hard reset, soft reset may be useful after hard reset """
+        """ After power on, sensor seems to require a hard reset, soft reset may be useful after hard reset """
         if self._reset_pin:
             self._hard_reset()
             reset_type = "Hard"
@@ -865,8 +873,6 @@ class BNO08X:
 
         if self._reset_mismatch:
             raise RuntimeError("Reset cause mismatch; check reset_pin wiring")
-
-        # sleep_ms(600)  # is this excessive?
 
         raise RuntimeError(f"Failed to get valid Product ID Response (0xf8) with {reset_type} reset")
 
@@ -939,7 +945,6 @@ class BNO08X:
         """ raw magnetic from registers 3 data value and a raw timestamp"""
         return RawSensorFeature(self, BNO_REPORT_RAW_MAGNETOMETER, data_count=4)
 
-    # Other Sensor Reports
     @property
     def steps(self):
         """ The number of steps detected since the sensor was initialized"""
@@ -1021,8 +1026,7 @@ class BNO08X:
                                   _ME_TARE_NOW,  # Perform Tare Now
                                   axis,
                                   basis,  # rotation vector (quaternion) to be tared
-                                  0, 0, 0, 0, 0, 0,  # 6-11 Reserved
-                              ]
+                                  0, 0, 0, 0, 0, 0, ] # 6-11 Reserved
                               )
         return axis, basis
 
@@ -1245,9 +1249,7 @@ class BNO08X:
     def _handle_control_report(self, report_id: int, report_bytes: bytearray) -> None:
         """
         Handle control reports. Handle time-critical Timestamp methods first
-        :param report_id: report ID
-        :param report_bytes: portion of packet for report
-        :return:
+        for each report ID type, process the report_bytes.
         """
         # Base Timestamp (0xfb)
         if report_id == _BASE_TIMESTAMP:
@@ -1496,7 +1498,8 @@ class BNO08X:
         start_time = ticks_ms()
         while _elapsed_sec(start_time) < 3.0:
             try:
-                packet = self._read_packet(wait=False)
+                packet = self._read_packet(wait=True)
+                self._dbg(f"{packet.report_id=}")
                 if packet is None:
                     continue
                 if packet.channel_number != _BNO_CHANNEL_CONTROL:
@@ -1508,10 +1511,15 @@ class BNO08X:
                     # Handle packet to process _REPORT_PRODUCT_ID_RESPONSE reports (0xf8)
                     self._handle_packet(packet)
                     break
+                if packet.report_id == _REPORT_PRODUCT_ID_RESPONSE:
+                    # if report is _REPORT_PRODUCT_ID_RESPONSE reports (0xf8)
+                    self._handle_packet(packet)
+                    return True
             except (RuntimeError, PacketError):
+                self._dbg("_check_id packet error in check_id scanning for reports")
                 continue
 
-        # check if _REPORT_PRODUCT_ID_RESPONSE (0xf8) received
+        # check if sub-report is _REPORT_PRODUCT_ID_RESPONSE (0xf8) received
         if getattr(self, "_product_id_received", False):
             return True
 
@@ -1546,9 +1554,9 @@ class BNO08X:
         self._dbg("*** Soft Reset End, awaiting acknowledgement (0xf8)")
 
     def _wake_signal(self):
-        """ Wake is only performaed for spi operation  """
+        """ Wake is only performaed for SPI operation, I2C and UART have pass defined for this"""
         if self._wake_pin is not None:
-            self._dbg("WAKE pulse to BNO08x")
+            # self._dbg("WAKE pulse to BNO08x")
             self._wake_pin.value(0)
             sleep_us(500)  # typ 150 usec required in datasheet BNO datasheet Fig 6-=11 Host Int timing SPI
             self._wake_pin.value(1)
