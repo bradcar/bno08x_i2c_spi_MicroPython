@@ -231,7 +231,7 @@ _REPORTS_DICTIONARY = {
 _DEFAULT_REPORT_INTERVAL = const(50_000)  # 50,000us = 50ms, 20 MHz
 _QUAT_READ_TIMEOUT = 0.5  # timeout in seconds
 _PACKET_READ_TIMEOUT = 2.0  # timeout in seconds
-_FEATURE_ENABLE_TIMEOUT = 2.0  # timeout in seconds
+_FEATURE_ENABLE_TIMEOUT = 3.0  # timeout in seconds
 _DEFAULT_TIMEOUT = 2.0  # timeout in seconds
 _CALIBRATION_TIMEOUT = 5.0  # 10 sec
 _TIMEOUT_SHORT_MS = 100  # short sensor knows ME status, just needs to package and send (few ms)
@@ -802,7 +802,6 @@ class BNO08X:
         self.last_interrupt_us = -1  # used to signal first interrupt
         self.prev_interrupt_us = -1
         self.ms_at_interrupt = 0
-        self._data_available = False
         self._sensor_epoch_ms = 0.0
         self._last_base_timestamp_us = 0
 
@@ -850,7 +849,6 @@ class BNO08X:
         self.prev_interrupt_us = self.last_interrupt_us
         self.last_interrupt_us = ticks_us()
         self.ms_at_interrupt = ticks_ms()
-        self._data_available = True
         # * comment out self._dbg for normal operation, adds 105ms delay even with debug=False
         # self._dbg(f"INTERRUPT: at {self.last_interrupt_us=}, uart.any()={self._uart.any()}")
 
