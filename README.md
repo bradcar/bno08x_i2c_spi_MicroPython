@@ -1,8 +1,8 @@
 # bno08x-i2c-spi-micropython
-## Micropython I2C SPI library BNO08X sensors for 9-axis fusion
+## Micropython I2C SPI Library BNO08X Sensors for 9-axis Fusion
 
 bno08x MicroPython driver for I2C, SPI, UART on MicroPython. This is for the BNO086, BNO085, and BNO080 IMU sensors. The BNO08x sensors have a variety of sensors that can provide data/results.
-Each of these are accessed individually and called reports. A update_sensors must be called before sensors are read.
+Each of these are accessed individually and called reports. An update_sensors must be called before sensors are read.
 
 This driver is written to provide to respond to high-frequency reports (short period), and also provides 0.1 msec resolution 
 timestamps with each sensor report. Knowing IMU results together with timestamp of results is critical for many
@@ -11,17 +11,16 @@ telemetry applications.
 This driver requires that the int_pin and reset_pin be connected to the sensor.
 
 This library has been tested with BNO086 sensor on Raspberry Pico 2 W.
-The report frequency will be limited by the interface chosen. 
-SPI is the fastest and SPI is 40% faster than I2C, but more importantly SPI avoids the bno08x's non-standard I2C clock stretching that the BNO08x sensors perform.
-I2C Clock Stretching causes IO errors in these cases.
-SPI is also 5.3x faster than UART. Choose the report rate and interface that meets your needs.
+The report frequency can be limited by the interface chosen. SPI is the fastest, but more importantly, SPI avoids the bno08x's non-standard I2C clock stretching that the BNO08x sensors perform.
+I2C Clock Stretching causes IO errors in these cases. SPI and I2C can process 1.0 usec reports at a rate of 1.2 usec.
+UART can process 1.0 usec reports at a rate of 1.5 usec.
 
 **Credits - Many thanks!**
 - 100% inspired by the original Adafruit CircuitPython I2C library for BNO08X. Copyright (c) 2020 Bryan Siepert for Adafruit Industries. ([GitHub link](https://github.com/adafruit/Adafruit_CircuitPython_BNO08x))
 - This code was also inspired by feature and fixes written by dobodu ([GitHub link](https://github.com/dobodu/BOSCH-BNO085-I2C-micropython-library))
 - ...thanks in advance for any pull request contributions.
 
-## Setting up to use the Sensor
+## Setting up the BNO08x Sensor
 
 ### I2C Setup
 
@@ -49,7 +48,7 @@ Optional parameters:
 The maximum clock frequency for i2c is 400_000 (~400kbs). PS0 (wake_pin) and PS1 are used to select I2C.
 To use I2C, both PS0 and PS1 can not have solder blobs which means both are tied to ground. I2C can not use wake_pin.
 
-## Enable the sensor reports
+## Enable the Sensor Reports
 
 Before getting sensor report, each specific report must be enabled.
 
@@ -69,7 +68,7 @@ Primary sensor report constants:
     bno.stability_classifier.enable()
     bno.activity_classifier.enable()
 
-## Getting the sensor results:
+## Getting the Sensor Results:
 
 Sensors values can be read after you perform a bno.update_sensors:
 
@@ -131,7 +130,7 @@ The following can be used as the basis to tare the sensor (details  in reference
 -   0: quaternion
 -   1: game_quaternion
 -   2: geomagnetic_quaternion
-Typically you want to tare on all axis and will specify this with 0x07.
+Typically, you want to tare on all axis and will specify this with 0x07.
 
 
     basis = 0 # quaternions
@@ -168,7 +167,7 @@ You can request different frequecies and the BNO08X will pick the closest freque
 See the seletion below (_Details on Report Frequencies_) for more details.
 If your code requests reports faster than the report feature frequency specified, repeated values will be returned.
 
-## Euler angles, gimbal lock, and quaternions
+## Euler Angles, Gimbal Lock, and Quaternions
 
 Euler angles have a problem with Gimbal Lock. With Euler angles, a loss of a degree of freedom occurs when two
 rotational axes align, which means certain orientations have multiple representations. 
@@ -181,7 +180,7 @@ Quaternions use several rotation around a single axis and an angle.
 - https://en.wikipedia.org/wiki/Quaternions_and_spatial_rotation
 - https://www.youtube.com/watch?v=zjMuIxRvygQ
 
-## I2C Clock-stretch issues on BNO08x and communication errors
+## I2C Clock-stretch Issues on BNO08x and Communication Errors
 
 Unfortunately, the BNO080, BNO085, and BNO086 all use **_non-standard clock stretching_** on I2C.
 This causes a variety of issues including report errors and the need to restart/reset the sensor.
@@ -189,13 +188,13 @@ Clock stretching interferes with various chips (ex: RP2) in different ways.
 If you see ETIMEDOUT, this is likely the issue (BNO08X Datasheet 1000-3927 v1.17, page 15).
 Some have had good results with software I2C (emulation). We do not know how this impacts performance.
 
-## SPI Setup - for higher speed sensor reports (no clock-stretch issues)
+## SPI Setup - High Speed & Stable (No Clock-Stretch Issues)
 
 In order to use SPI on most sensor boards you must add ONE solder blob on PS1. 
 On the back side of Sparkfun BNO086 and Adafruit BNO085, you need a solder blob to bridge PS1 which will set PS1 high for SPI operation. 
 The PS0 (Wake_pin) must be connected to a gpio (wake_pin), please be careful not put a solder blog on PS0.
 This driver uses the wake-pin after reset as a ‘wake’ signal taking the BNO08X out of sleep for communication with the BNO08X.
-On the Sparkfun BNO086 when using SPI, you must clear i2c jumper when using SPI or UART (https://docs.sparkfun.com/SparkFun_VR_IMU_Breakout_BNO086_QWIIC/assets/board_files/SparkFun_VR_IMU_Breakout_BNO086_QWIIC_Schematic_v10.pdf)
+On the Sparkfun BNO086 when using SPI, you must clear I2C jumper when using SPI or UART (https://docs.sparkfun.com/SparkFun_VR_IMU_Breakout_BNO086_QWIIC/assets/board_files/SparkFun_VR_IMU_Breakout_BNO086_QWIIC_Schematic_v10.pdf)
 
 SPI should be set to baudrate=3000000.
 
@@ -221,9 +220,9 @@ Required for SPI:
 Optional for SPI:
 - debug : prints very detailed logs, primarily for driver debug & development.
 
-This driver will reset the spi to have polarity=1 and phase=1 as required by the bno08x.
+This driver will reset the SPI to have polarity=1 and phase=1 as required by the bno08x.
 
-## UART Setup -- WARNING - WARNING UART IN DEBUG !!!
+## UART Setup
 
  UART must be set to baudrate=3_000_000 (only).
 
@@ -237,7 +236,7 @@ This driver will reset the spi to have polarity=1 and phase=1 as required by the
     uart = UART(1, baudrate=3000000, tx=Pin(8), rx=Pin(9), timeout=500)
     bno = BNO08X_UART(uart, reset_pin=reset_pin, int_pin=int_pin, debug=False)
 
-UART wires are, in some sense, opposite of i2c wires (double-check your wiring).
+UART wires are, in some sense, opposite of I2C wires (double-check your wiring).
 uart = UART(1, baudrate=3000000, tx=Pin(8), rx=Pin(9), timeout=2000)
 uart = UART(0, baudrate=3000000, tx=Pin(12), rx=Pin(13), timeout=2000)
 
@@ -247,7 +246,7 @@ Required for UART:
 
 PS0 and PS1 are the host interface protocol selection pins, therefore UART can not use a wake pin.  In order to use UART, PS1 must be high (solder blob) and PS0/WAKE not have solder blob so it is tied to ground.
 
-1. must clear i2c jumper when using SPI or UART (https://docs.sparkfun.com/SparkFun_VR_IMU_Breakout_BNO086_QWIIC/assets/board_files/SparkFun_VR_IMU_Breakout_BNO086_QWIIC_Schematic_v10.pdf)
+1. must clear I2C jumper when using SPI or UART (https://docs.sparkfun.com/SparkFun_VR_IMU_Breakout_BNO086_QWIIC/assets/board_files/SparkFun_VR_IMU_Breakout_BNO086_QWIIC_Schematic_v10.pdf)
 2. must have solder blob ONLY on SP1, must NOT have Wake pin connect to a pin.
 
 ## Details on Report Frequencies
@@ -317,7 +316,7 @@ For more details on the procedure to calibrate the BNO08X, refer to the BNO08X S
 application note.
 - https://cdn.sparkfun.com/assets/9/e/1/d/9/Sensor-Calibration-Procedure-v1.1.pdf
 
-## Raw Reports - Be Careful
+## Raw Reports - Be Careful!
     BNO_REPORT_RAW_ACCELEROMETER
     BNO_REPORT_RAW_GYROSCOPE
     BNO_REPORT_RAW_MAGNETOMETER
