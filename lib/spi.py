@@ -124,7 +124,6 @@ class BNO08X_SPI(BNO08X):
         while ticks_diff(ticks_ms(), start_time) < 10:
             if self.last_interrupt_us != initial_int_time:
                 return
-                # sleep_us(100)
 
         raise RuntimeError(f"_wait_for_int timeout ({ticks_diff(ticks_ms(), start_time)}ms) waiting for int_pin")
 
