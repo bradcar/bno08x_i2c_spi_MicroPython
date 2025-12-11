@@ -33,7 +33,6 @@ Each Sensor needs:
 """
 from struct import pack_into
 
-import uctypes
 from machine import Pin
 from utime import ticks_ms, ticks_diff, sleep_us
 
@@ -46,12 +45,6 @@ from bno08x import BNO08X, Packet, PacketError, DATA_BUFFER_SIZE
 # 282: x01 x1a   spi header+advert
 # 284: x01 x1c   i2c header+advert
 _SHTP_MAX_CARGO_PACKET_BYTES = 284
-
-_HEADER_STRUCT = {
-    "packet_bytes": (uctypes.UINT16 | 0),
-    "channel": (uctypes.UINT8 | 2),
-    "sequence": (uctypes.UINT8 | 3),
-}
 
 
 def _is_spi(obj) -> bool:
@@ -178,11 +171,11 @@ class BNO08X_SPI(BNO08X):
         self._read_header(wait=wait)
         sleep_us(100)
 
-        raw = bytes(self._data_buffer) # forces materialization of bytearray
+        raw = bytes(self._data_buffer)  # forces materialization of bytearray
         raw_packet_bytes = raw[0] | (raw[1] << 8)
         channel = raw[2]
         seq = raw[3]
-        
+
         self._rx_sequence_number[channel] = seq  # SH2 Sequence number
 
         if raw_packet_bytes == 0:  # Fast return, if only SHTP header
