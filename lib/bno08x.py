@@ -71,12 +71,12 @@ from micropython import const
 from utime import ticks_ms, ticks_us, ticks_diff, sleep_ms, sleep_us
 
 # Commands
-BNO_CHANNEL_SHTP_COMMAND = const(0)
-BNO_CHANNEL_EXE = const(1)
-_BNO_CHANNEL_CONTROL = const(2)
-_BNO_CHANNEL_INPUT_SENSOR_REPORTS = const(3)
-_BNO_CHANNEL_WAKE_INPUT_SENSOR_REPORTS = const(4)
-_BNO_CHANNEL_GYRO_ROTATION_VECTOR = const(5)
+SHTP_CHAN_COMMAND = const(0)
+SHTP_CHAN_EXE = const(1)
+SHTP_CHAN_CONTROL = const(2)
+SHTP_CHAN_INPUT = const(3)
+SHTP_CHAN_WAKE_INPUT = const(4)
+BNO_CHAN_GYRO_ROTATION_VECTOR = const(5)
 
 channels = {
     0x0: "SHTP_COMMAND",
@@ -445,7 +445,7 @@ class Packet:
         outstr += f"DBG::\t\t Channel: {channels[self.channel]} ({hex(self.channel)})\n"
         outstr += f"DBG::\t\t Sequence: {self.seq}\n"
 
-        if self.channel in {_BNO_CHANNEL_CONTROL, _BNO_CHANNEL_INPUT_SENSOR_REPORTS, }:
+        if self.channel in {SHTP_CHAN_CONTROL, SHTP_CHAN_INPUT, }:
             if self.report_id in _REPORTS_DICTIONARY:
                 outstr += f"DBG::\t\t Report Type: {_REPORTS_DICTIONARY[self.report_id]} ({hex(self.report_id)})\n"
             else:
@@ -466,20 +466,20 @@ class Packet:
         # outstr += f"\nDBG::\t\t ascii: {ascii}\n"
         
         # preliminary decoding of packets
-        if self.byte_count - 4 == 15 and self.channel == _BNO_CHANNEL_INPUT_SENSOR_REPORTS and self.report_id == 0xfb:
+        if self.byte_count - 4 == 15 and self.channel == SHTP_CHAN_INPUT and self.report_id == 0xfb:
             outstr += f"DBG::\t\t first report: {_REPORTS_DICTIONARY[self.data[5]]} ({hex(self.data[5])})\n"
 
-        if self.byte_count - 4 == 1 and self.channel == BNO_CHANNEL_EXE and self.report_id == 0x01:
+        if self.byte_count - 4 == 1 and self.channel == SHTP_CHAN_EXE and self.report_id == 0x01:
             outstr += "DBG::\t\t Command Execution Response: SHTP_COMMAND (0x0)"
             outstr += "\nDBG::\t\t - Reset Complete Acknowledged, 0xf8 reports to follow\n"
 
         # On channel 0 BNO_CHANNEL_SHTP_COMMAND, send _COMMAND_ADVERTISE (0)
         # This will provide sensor information that is printed with debug=True
         # Still need to debug this
-        if self.byte_count - 4 == 51 and self.channel == BNO_CHANNEL_SHTP_COMMAND and self.report_id == _COMMAND_ADVERTISE:
+        if self.byte_count - 4 == 51 and self.channel == SHTP_CHAN_COMMAND and self.report_id == _COMMAND_ADVERTISE:
             outstr += "DBG::\t\tNew Style SHTP Advertisement Response (0x00), channel: SHTP_COMMAND (0x0)\n"
             outstr += "\nDBG::\t\t - todo: no decoder for New Style SHTP Advertisement Response\n"
-        if self.byte_count - 4 == 34 and self.channel == BNO_CHANNEL_SHTP_COMMAND and self.report_id == _COMMAND_ADVERTISE:
+        if self.byte_count - 4 == 34 and self.channel == SHTP_CHAN_COMMAND and self.report_id == _COMMAND_ADVERTISE:
             outstr += "DBG::\t\tOld Style SHTP Advertisement Response (0x00), channel: SHTP_COMMAND (0x0)\n"
             p = 4
             response_id = self.data[p]
@@ -828,7 +828,7 @@ class BNO08X:
         data[0] = _COMMAND_ADVERTISE
         data[1] = 0
         self._wake_signal()
-        self._send_packet(BNO_CHANNEL_SHTP_COMMAND, data)
+        self._send_packet(SHTP_CHAN_COMMAND, data)
 
     def _on_interrupt(self, pin):
         """
@@ -1135,11 +1135,11 @@ class BNO08X:
         _insert_command_request_report(
             me_type,
             self._command_buffer,
-            self._tx_sequence_number[_BNO_CHANNEL_CONTROL],
+            self._tx_sequence_number[SHTP_CHAN_CONTROL],
             me_command,
         )
         self._wake_signal()
-        self._send_packet(_BNO_CHANNEL_CONTROL, local_buffer)
+        self._send_packet(SHTP_CHAN_CONTROL, local_buffer)
 
         # change timeout to checking flag for ME Calbiration Response 6.4.6.3 SH-2
         while _elapsed_sec(start_time) < _DEFAULT_TIMEOUT:
@@ -1154,10 +1154,10 @@ class BNO08X:
         _insert_command_request_report(
             _SAVE_DCD_COMMAND,
             local_buffer,
-            self._tx_sequence_number[_BNO_CHANNEL_CONTROL],
+            self._tx_sequence_number[SHTP_CHAN_CONTROL],
         )
         self._wake_signal()
-        self._send_packet(_BNO_CHANNEL_CONTROL, local_buffer)
+        self._send_packet(SHTP_CHAN_CONTROL, local_buffer)
         while _elapsed_sec(start_time) < _DEFAULT_TIMEOUT:
             self._process_available_packets()
             if self._dcd_saved_at > start_time:
@@ -1496,11 +1496,11 @@ class BNO08X:
 
         # send request _SET_FEATURE_COMMAND (0xfb) with requested period
         self._wake_signal()
-        self._send_packet(_BNO_CHANNEL_CONTROL, set_feature_report)
+        self._send_packet(SHTP_CHAN_CONTROL, set_feature_report)
 
         # wait for response, ignore packets until _GET_FEATURE_RESPONSE (0xfc)
         try:
-            report_bytes = self._wait_for_packet(_BNO_CHANNEL_CONTROL, _GET_FEATURE_RESPONSE,
+            report_bytes = self._wait_for_packet(SHTP_CHAN_CONTROL, _GET_FEATURE_RESPONSE,
                                                  timeout=_FEATURE_ENABLE_TIMEOUT)
             data = report_bytes.data
             fid = data[1]
@@ -1545,7 +1545,7 @@ class BNO08X:
         data[0] = _REPORT_PRODUCT_ID_REQUEST
         data[1] = 0
         self._wake_signal()
-        self._send_packet(_BNO_CHANNEL_CONTROL, data)
+        self._send_packet(SHTP_CHAN_CONTROL, data)
 
         # On channel 2, read/skip packets until _COMMAND_RESPONSE (0xf1)
         start_time = ticks_ms()
@@ -1555,7 +1555,7 @@ class BNO08X:
                 reportid = packet.report_id
                 if packet is None:
                     continue
-                if packet.channel != _BNO_CHANNEL_CONTROL:
+                if packet.channel != SHTP_CHAN_CONTROL:
                     self._dbg("_check_id skipping above packet\n")
                     continue
                 if packet.byte_count - 4 == 0:
@@ -1597,10 +1597,10 @@ class BNO08X:
 
     def _soft_reset(self) -> None:
         """Send the 'reset' command packet on Executable Channel (1), Section 1.3.1 SHTP"""
-        self._dbg(f"*** Soft Reset, Channel={BNO_CHANNEL_EXE} command={_COMMAND_RESET}, starting...")
+        self._dbg(f"*** Soft Reset, Channel={SHTP_CHAN_EXE} command={_COMMAND_RESET}, starting...")
         reset_payload = bytearray([_COMMAND_RESET])
         self._wake_signal()
-        self._send_packet(BNO_CHANNEL_EXE, reset_payload)
+        self._send_packet(SHTP_CHAN_EXE, reset_payload)
         sleep_ms(500)
         start_time = ticks_ms()
         self._dbg("*** Soft Reset End, awaiting acknowledgement (0xf8)")
