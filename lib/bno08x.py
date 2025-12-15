@@ -79,12 +79,12 @@ SHTP_CHAN_WAKE_INPUT = const(4)
 BNO_CHAN_GYRO_ROTATION_VECTOR = const(5)
 
 channels = {
-    0x0: "SHTP_COMMAND",
-    0x1: "EXE",
-    0x2: "CONTROL",
-    0x3: "INPUT_SENSOR_REPORTS",
-    0x4: "WAKE_INPUT_SENSOR_REPORTS",
-    0x5: "GYRO_ROTATION_VECTOR",
+    0x0: "SHTP_CHAN_COMMAND",
+    0x1: "SHTP_CHAN_EXE",
+    0x2: "SHTP_CHAN_CONTROL",
+    0x3: "SHTP_CHAN_INPUT",
+    0x4: "SHTP_CHAN_WAKE_INPUT",
+    0x5: "BNO_CHAN_GYRO_ROTATION_VECTOR",
 }
 
 _GET_FEATURE_REQUEST = const(0xFE)
@@ -432,10 +432,11 @@ def _insert_command_request_report(
 class Packet:
     """ A class representing a Sensor Hub Transport Packet (4-byte headers) """
 
-    def __init__(self, packet_bytes: bytearray) -> None:
+    def __init__(self, packet_sh2: bytearray) -> None:
         """header = PacketHeader(packet_byte_count, channel_number, sequence_number, report_id_number)"""
-        self.header = self.header_from_buffer(packet_bytes)
-        self.data = packet_bytes[4:self.byte_count]
+        self.header = self.header_from_buffer(packet_sh2)
+        #self.data = packet_sh2[4:self.byte_count]
+        self.packet_sh2 = packet_sh2
 
     def __str__(self) -> str:
         length = self.byte_count
@@ -452,67 +453,95 @@ class Packet:
                 outstr += f"DBG::\t\t \t** UNKNOWN Report Type **: {hex(self.report_id)}\n"
             if self.report_id == 0xFC and length - 4 >= 6 and self.report_id in _REPORTS_DICTIONARY:
                 # first report_id (self.data[0]), the report type to be enabled (self.data[1])
-                outstr += f"DBG::\t\t Feature Enabled: {_REPORTS_DICTIONARY[self.data[1]]} ({hex(self.data[1])})\n"
+                outstr += f"DBG::\t\t Feature Enabled: {_REPORTS_DICTIONARY[self.packet_sh2[5]]} ({hex(self.packet_sh2[5])})\n"
 
         outstr += "\nDBG::\t\tData:\n"
         outstr += f"DBG::\t\t Data Len: {length - 4}"
-        for idx, packet_byte in enumerate(self.data[:length]):
+        for idx, packet_byte in enumerate(self.packet_sh2[4:length]):
             packet_index = idx + 4
             if (packet_index % 4) == 0:
                 outstr += f"\nDBG::\t\t[0x{packet_index:02X}] "
             outstr += f"0x{packet_byte:02X} "
         outstr += "\n\t\t*******************************\n"
-        # ascii = ''.join(chr(b) if 32 <= b <= 126 else f" x{b:02X}" for b in self.data[:length])
+        # ascii = ''.join(chr(b) if 32 <= b <= 126 else f" x{b:02X}" for b in self.packet_sh2[:length])
         # outstr += f"\nDBG::\t\t ascii: {ascii}\n"
         
         # preliminary decoding of packets
         if self.byte_count - 4 == 15 and self.channel == SHTP_CHAN_INPUT and self.report_id == 0xfb:
-            outstr += f"DBG::\t\t first report: {_REPORTS_DICTIONARY[self.data[5]]} ({hex(self.data[5])})\n"
+            outstr += f"DBG::\t\t first report: {_REPORTS_DICTIONARY[self.packet_sh2[9]]} ({hex(self.packet_sh2[9])})\n"
 
         if self.byte_count - 4 == 1 and self.channel == SHTP_CHAN_EXE and self.report_id == 0x01:
             outstr += "DBG::\t\t Command Execution Response: SHTP_COMMAND (0x0)"
             outstr += "\nDBG::\t\t - Reset Complete Acknowledged, 0xf8 reports to follow\n"
 
         # On channel 0 BNO_CHANNEL_SHTP_COMMAND, send _COMMAND_ADVERTISE (0)
-        # This will provide sensor information that is printed with debug=True
-        # Still need to debug this
         if self.byte_count - 4 == 51 and self.channel == SHTP_CHAN_COMMAND and self.report_id == _COMMAND_ADVERTISE:
             outstr += "DBG::\t\tNew Style SHTP Advertisement Response (0x00), channel: SHTP_COMMAND (0x0)\n"
-            outstr += "\nDBG::\t\t - todo: no decoder for New Style SHTP Advertisement Response\n"
+            length = len(self.packet_sh2)
+            index = 5
+            # Tag Processors: {tag_id: (name, format, subtract_header_4, clamp_max_1024)}
+            tag_dictionary = {0: ("TAG_NULL", 'S', 0, 0), 1: ("TAG_GUID", '<I', 0, 0), 2: ("Max Cargo Write", '<H', 1, 0),
+                 3: ("Max Cargo Read", '<H', 1, 0), 4: ("TAG_MAX_TRANSFER_WRITE", '<H', 0, 1),
+                 5: ("TAG_MAX_TRANSFER_READ", '<H', 0, 1), 6: ("TAG_NORMAL_CHANNEL", '<B', 0, 0),
+                 7: ("TAG_WAKE_CHANNEL", '<B', 0, 0), 8: ("TAG_APP_NAME", 'S', 0, 0), 9: ("TAG_CHANNEL_NAME", 'S', 0, 0),
+                 10: ("TAG_ADV_COUNT", '<B', 0, 0), 0x80: ("Version", 'S', 0, 0)}
+
+            while index < length:
+                tag, tag_len = self.packet_sh2[index:index + 2]
+                value_index = index + 2
+                next_index = value_index + tag_len
+                value = self.packet_sh2[value_index:next_index]
+                index = next_index
+
+                if tag not in tag_dictionary:
+                    outstr += f"Uknown tag = {tag}\n"
+                    continue
+                
+                name, fmt, sub_hdr, clamp = tag_dictionary[tag]
+                if fmt == 'S':
+                    s = "" if tag == 0 else f": {value.decode('ascii')}"
+                    outstr += f"DBG::\t\t {name}{s}\n"
+                else:
+                    v = unpack_from(fmt, value)[0]
+                    if sub_hdr:
+                        v -= 4; s = ", without header"
+                    else:
+                        s = ""
+                    if clamp: v = min(v, 1024)
+                    outstr += f"DBG::\t\t {name}: {v}{s}\n"
+
+            return outstr
+
         if self.byte_count - 4 == 34 and self.channel == SHTP_CHAN_COMMAND and self.report_id == _COMMAND_ADVERTISE:
             outstr += "DBG::\t\tOld Style SHTP Advertisement Response (0x00), channel: SHTP_COMMAND (0x0)\n"
-            p = 4
-            response_id = self.data[p]
-            normal_channel = self.data[p + 1]
-            wake_channel = self.data[p + 2]
-            max_cargo_write = self.data[p + 3] | (self.data[p + 4] << 8)
-            max_cargo_read = self.data[p + 5] | (self.data[p + 6] << 8)
-            max_transfer_write = self.data[p + 7] | (self.data[p + 8] << 8)
-            max_transfer_read = self.data[p + 9] | (self.data[p + 10] << 8)
+            p = 4 + 4
+            response_id = self.packet_sh2[p]
+            normal_channel = self.packet_sh2[p + 1]
+            wake_channel = self.packet_sh2[p + 2]
+            max_cargo_write = self.packet_sh2[p + 3] | (self.packet_sh2[p + 4] << 8)
+            max_cargo_read = self.packet_sh2[p + 5] | (self.packet_sh2[p + 6] << 8)
+            max_transfer_write = self.packet_sh2[p + 7] | (self.packet_sh2[p + 8] << 8)
+            max_transfer_read = self.packet_sh2[p + 9] | (self.packet_sh2[p + 10] << 8)
             outstr += f"DBG::\t\t Normal Channel: {normal_channel}\n"
             outstr += f"DBG::\t\t Wake Channel: {wake_channel}\n"
             outstr += f"DBG::\t\t Max Cargo Write: {max_cargo_write}\n"
             outstr += f"DBG::\t\t Max Cargo Read:  {max_cargo_read}\n"
             outstr += f"DBG::\t\t Max Transfer Write: {max_transfer_write}\n"
             outstr += f"DBG::\t\t Max Transfer Read: {max_transfer_read}\n"
-
             idx = p + 11  # strings, null terminated
             end = self.byte_count
-
             def read_cstring(buf, start):
                 i = start
                 while i < end and buf[i] != 0:
                     i += 1
                 s = buf[start:i].decode("ascii", "ignore")
                 return s, i + 1
-
-            app_name, idx = read_cstring(self.data, idx)
-            chan_name, idx = read_cstring(self.data, idx)
-            ctl_name, idx = read_cstring(self.data, idx)
+            app_name, idx = read_cstring(self.packet_sh2, idx)
+            chan_name, idx = read_cstring(self.packet_sh2, idx)
+            ctl_name, idx = read_cstring(self.packet_sh2, idx)
             outstr += f"DBG::\t\t App: {app_name}\n"
             outstr += f"DBG::\t\t Channel: {chan_name}\n"
             outstr += f"DBG::\t\t Controller: {ctl_name}\n"
-
         return outstr
 
     @property
@@ -1235,15 +1264,16 @@ class BNO08X:
             return
 
         self._in_handle = True
-        data_view = memoryview(packet.data)
-        data_length = len(packet.data)
+        #data_view = memoryview(packet.packet_sh2)
+        data_length = len(packet.packet_sh2)
 
         try:
-            next_byte_index = 0
-            report_count = 0
+            # offsets for header
+            next_byte_index = 4
+            report_count = 4
 
             while next_byte_index < data_length:
-                report_id = data_view[next_byte_index]
+                report_id = packet.packet_sh2[next_byte_index]
 
                 # Look up required byte count for each Report type, only enabled ones defined, others commented out
                 if report_id <= 0x2d:  # highest in SH-2 reference, many unimplemented
@@ -1253,12 +1283,12 @@ class BNO08X:
                     except:
                         self._dbg(f"INVALID REPORT ID in_handle_packet {report_id} {hex(report_id)=}")
                         self._dbg(f"Invalid Report Id {next_byte_index=}, next 6 bytes follows:")
-                        self._dbg(f"_handle_packet: {[hex(x) for x in packet.data[next_byte_index: next_byte_index + 8]]}")
+                        self._dbg(f"_handle_packet: {[hex(x) for x in packet.packet_sh2[next_byte_index: next_byte_index + 8]]}")
 
                         # todo remove after debut, don't like skipping
                         print(f"INVALID REPORT ID in_handle_packet {report_id} {hex(report_id)=}")
                         print(f"INVALID REPORT ID {next_byte_index=}, up to 8 bytes follow:")
-                        print(f"_handle_packet: {[hex(x) for x in packet.data[next_byte_index: next_byte_index + 8]]}")
+                        print(f"_handle_packet: {[hex(x) for x in packet.packet_sh2[next_byte_index: next_byte_index + 8]]}")
                         raise NotImplementedError(f"Un-implemented Report ({hex(report_id)=}) not supported yet.")
                 else:
                     required_bytes = _REPORT_LENGTHS.get(report_id, 0)
@@ -1272,7 +1302,7 @@ class BNO08X:
                     self._dbg(f"Unprocessable batch ERROR: skipping ! {unprocessed_byte_count} bytes")
                     break
 
-                report_view = data_view[next_byte_index: next_byte_index + required_bytes]
+                report_view = packet.packet_sh2[next_byte_index: next_byte_index + required_bytes]
 
                 self._process_report(report_id, report_view)
                 report_count += 1
@@ -1282,7 +1312,7 @@ class BNO08X:
             # self._dbg(f"HANDLING {report_count} PACKET{'S' if report_count > 1 else ''}...")
 
         except Exception as error:
-            self._dbg(f"Handle Packet: Packet bytes:{[hex(b) for b in packet.data[:4]]}...")
+            self._dbg(f"Handle Packet: Packet bytes:{[hex(b) for b in packet.packet_sh2[:4]]}...")
             raise
         finally:
             self._in_handle = False
@@ -1502,8 +1532,8 @@ class BNO08X:
         try:
             report_bytes = self._wait_for_packet(SHTP_CHAN_CONTROL, _GET_FEATURE_RESPONSE,
                                                  timeout=_FEATURE_ENABLE_TIMEOUT)
-            data = report_bytes.data
-            fid = data[1]
+            data = report_bytes.packet_sh2
+            fid = data[5]
             report_interval = unpack_from("<I", data, 5)[0]
             self._report_values[feature_id] = _INITIAL_REPORTS.get(feature_id, (0.0, 0.0, 0.0, 0, 0))
             self._report_periods_dictionary_us[feature_id] = report_interval
