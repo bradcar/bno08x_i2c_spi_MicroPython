@@ -21,7 +21,7 @@ print("I2C devices found:", [hex(d) for d in i2c0.scan()])
 print("Start")
 print("====================================\n")
 
-bno.acceleration.enable(250)
+bno.acceleration.enable(100)
 
 bno.print_report_period()
 
