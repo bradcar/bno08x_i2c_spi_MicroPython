@@ -951,7 +951,7 @@ class BNO08X:
     ############ USER VISIBLE REPORT FUNCTIONS ###########################
 
     def update_sensors(self):
-        num_packets = self._process_available_packets()
+        num_packets = self._parse_packets()
         if num_packets > 1:
             print(f"***update_sensors: #packet={num_packets}")
         return num_packets
@@ -1221,7 +1221,7 @@ class BNO08X:
 
         # change timeout to checking flag for ME Calbiration Response 6.4.6.3 SH-2
         while _elapsed_sec(start_time) < _DEFAULT_TIMEOUT:
-            self._process_available_packets()
+            self._parse_packets()
             if self._me_calibration_started_at > start_time:
                 break
 
@@ -1237,38 +1237,60 @@ class BNO08X:
         self._wake_signal()
         self._send_packet(SHTP_CHAN_CONTROL, local_buffer)
         while _elapsed_sec(start_time) < _DEFAULT_TIMEOUT:
-            self._process_available_packets()
+            self._parse_packets()
             if self._dcd_saved_at > start_time:
                 return
         raise RuntimeError("Could not save calibration data")
 
     #     ############### private/helper methods ###############
 
-    def _process_available_packets(self) -> int:
+    def _parse_packets(self) -> int:
         """
         Fast processing of packets while data-ready is active.
         
         TODO: Haven't seen packets processed_count > 1, revisit the logic
         """
         processed_count = 0
-        end_time = ticks_ms() + 1  # 1 ms guard
+        max_packets = _MAX_PACKET_PROCESS
+        end_time = ticks_ms() + 10  #10ms guard time
+        report_length_map = _REPORT_LENGTHS
 
-        while self._data_ready and processed_count < _MAX_PACKET_PROCESS:
-            if ticks_diff(ticks_ms(), end_time) >= 0:
+        while self._data_ready and processed_count < max_packets:
+            if processed_count > 0 and ticks_diff(ticks_ms(), end_time) >= 0:
+                self._dbg("_parse_packets processing timed out, 10ms")
                 break
-            try:
-                packet = self._read_packet(wait=False)
-            except PacketError:
-                continue
+
+            packet = self._read_packet(wait=False)
             if packet is None:
                 break
 
-            if len(packet.packet_sh2) > 0 and packet.packet_sh2[0] == 0x00:
+            packet_sh2 = packet.packet_sh2
+            data_length = len(packet_sh2)
+            if data_length > 0 and packet_sh2[0] == 0x00:
                 processed_count += 1
                 continue
 
-            self._handle_packet(packet)
-            processed_count += 1
+            # --- START INLINED _handle_packet ---
+            next_byte_index = 4  # Payload after the 4-byte SHTP header
+            while next_byte_index < data_length:
+                report_id = packet_sh2[next_byte_index]
+                required_bytes = report_length_map.get(report_id, 0)
+
+                if required_bytes == 0:
+                    self._dbg(f"UNSUPPORTED Report ID {hex(report_id)} - SKIPPING ONE BYTE")
+                    next_byte_index += 1
+                    continue
+
+                unprocessed_byte_count = data_length - next_byte_index
+                if unprocessed_byte_count < required_bytes:
+                    self._dbg(f"UNSUPPORTED truncated Packet ERROR: {unprocessed_byte_count} bytes")
+                    break
+
+                report_view = packet_sh2[next_byte_index: next_byte_index + required_bytes]
+                self._process_report(report_id, report_view)
+
+                next_byte_index += required_bytes
+            # --- END INLINED _handle_packet  ---
 
         return processed_count
 
