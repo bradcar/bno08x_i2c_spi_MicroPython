@@ -87,6 +87,8 @@ channels = {
     0x5: "BNO_CHAN_GYRO_ROTATION_VECTOR",
 }
 
+_SHTP_HEADER_LEN = 4
+
 _GET_FEATURE_REQUEST = const(0xFE)
 _SET_FEATURE_COMMAND = const(0xFD)
 _GET_FEATURE_RESPONSE = const(0xFC)
@@ -260,7 +262,7 @@ DEFAULT_REPORT_FREQ = {
     BNO_REPORT_GYRO_INTEGRATED_ROTATION_VECTOR: 10,
 }
 
-# pre-calculates the reciprocals
+# pre-calculate the reciprocals
 _Q_POINT_14_SCALAR = 2 ** (14 * -1)
 _Q_POINT_12_SCALAR = 2 ** (12 * -1)
 _Q_POINT_9_SCALAR = 2 ** (9 * -1)
@@ -485,14 +487,14 @@ class Packet:
                 outstr += f"DBG::\t\t Report Type: {_REPORTS_DICTIONARY[self.report_id]} ({hex(self.report_id)})\n"
             else:
                 outstr += f"DBG::\t\t \t** UNKNOWN Report Type **: {hex(self.report_id)}\n"
-            if self.report_id == 0xFC and length - 4 >= 6 and self.report_id in _REPORTS_DICTIONARY:
+            if self.report_id == 0xFC and length - _SHTP_HEADER_LEN >= 6 and self.report_id in _REPORTS_DICTIONARY:
                 # first report_id (self.data[0]), the report type to be enabled (self.data[1])
                 outstr += f"DBG::\t\t Feature Enabled: {_REPORTS_DICTIONARY[self.packet_sh2[5]]} ({hex(self.packet_sh2[5])})\n"
 
         outstr += "\nDBG::\t\tData:\n"
-        outstr += f"DBG::\t\t Data Len: {length - 4}"
+        outstr += f"DBG::\t\t Data Len: {length - _SHTP_HEADER_LEN}"
         for idx, packet_byte in enumerate(self.packet_sh2[4:length]):
-            packet_index = idx + 4
+            packet_index = idx + _SHTP_HEADER_LEN
             if (packet_index % 4) == 0:
                 outstr += f"\nDBG::\t\t[0x{packet_index:02X}] "
             outstr += f"0x{packet_byte:02X} "
@@ -501,19 +503,19 @@ class Packet:
         # outstr += f"\nDBG::\t\t ascii: {ascii}\n"
 
         # preliminary decoding of packets
-        if self.byte_count - 4 == 15 and self.channel == SHTP_CHAN_INPUT and self.report_id == 0xfb:
+        if self.byte_count - _SHTP_HEADER_LEN == 15 and self.channel == SHTP_CHAN_INPUT and self.report_id == 0xfb:
             outstr += f"DBG::\t\t first report: {_REPORTS_DICTIONARY[self.packet_sh2[9]]} ({hex(self.packet_sh2[9])})\n"
 
-        if self.byte_count - 4 == 1 and self.channel == SHTP_CHAN_EXE and self.report_id == 0x01:
+        if self.byte_count - _SHTP_HEADER_LEN == 1 and self.channel == SHTP_CHAN_EXE and self.report_id == 0x01:
             outstr += "DBG::\t\t Command Execution Response: SHTP_COMMAND (0x0)"
             outstr += "\nDBG::\t\t - Reset Complete Acknowledged, 0xf8 reports to follow\n"
 
         # Advertisement Response provides sensor information that is printed with debug=True
         # I2C & UART use New Style Advertisement
-        if self.byte_count - 4 == 51 and self.channel == SHTP_CHAN_COMMAND and self.report_id == _COMMAND_ADVERTISE:
+        if self.byte_count - _SHTP_HEADER_LEN == 51 and self.channel == SHTP_CHAN_COMMAND and self.report_id == _COMMAND_ADVERTISE:
             outstr += "DBG::\t\tNew Style SHTP Advertisement Response (0x00), channel: SHTP_COMMAND (0x0)\n"
             length = len(self.packet_sh2)
-            index = 5
+            index = _SHTP_HEADER_LEN + 1
 
             # Tag Processors: {tag_id: (name, format, subtract_header_4, clamp_max_1024)}
             tag_dictionary = {0: ("TAG_NULL", 'S', 0, 0), 1: ("TAG_GUID", '<I', 0, 0),
@@ -553,9 +555,9 @@ class Packet:
 
         # Advertisement Response provides sensor information that is printed with debug=True
         # SPI uses New Style Advertisement
-        if self.byte_count - 4 == 34 and self.channel == SHTP_CHAN_COMMAND and self.report_id == _COMMAND_ADVERTISE:
+        if self.byte_count - _SHTP_HEADER_LEN == 34 and self.channel == SHTP_CHAN_COMMAND and self.report_id == _COMMAND_ADVERTISE:
             outstr += "DBG::\t\tOld Style SHTP Advertisement Response (0x00), channel: SHTP_COMMAND (0x0)\n"
-            p = 4 + 4
+            p = _SHTP_HEADER_LEN + 4
             response_id = self.packet_sh2[p]
             normal_channel = self.packet_sh2[p + 1]
             wake_channel = self.packet_sh2[p + 2]
@@ -1265,7 +1267,7 @@ class BNO08X:
                 continue
 
             # --- START INLINED _handle_packet ---
-            next_byte_index = 4  # Payload after the 4-byte SHTP header
+            next_byte_index = _SHTP_HEADER_LEN  # Payload after the 4-byte SHTP header
             while next_byte_index < data_length:
                 report_id = packet_sh2[next_byte_index]
                 required_bytes = report_length_map.get(report_id, 0)
@@ -1295,7 +1297,7 @@ class BNO08X:
         NOTE: **** this code is also inlined in _parse_packets for efficiency ****
         """
         data_length = len(packet.packet_sh2)
-        next_byte_index = 4  # offset to skip over SHTP header
+        next_byte_index = _SHTP_HEADER_LEN  # offset to skip over SHTP header
         report_count = 0
 
         while next_byte_index < data_length:
@@ -1411,7 +1413,7 @@ class BNO08X:
         if command == _ME_CALIBRATE_COMMAND and cal_status == 0:
             self._me_calibration_started_at = ticks_ms()
             self._calibration_started = True
-            self._dbg("Ready to start calibration at {ticks_ms()=}")
+            self._dbg(f"Ready to start calibration at {ticks_ms()=}")
 
         elif command == _SAVE_DCD_COMMAND:
             self._dbg(f"DCD Save calibration sucess. Status is {cal_status}")
@@ -1433,13 +1435,13 @@ class BNO08X:
             scalar, count = _SENSOR_SCALING[report_id]
 
             if count == 3:
-                v1, v2, v3 = unpack_from("<hhh", report_bytes, 4)
+                v1, v2, v3 = unpack_from("<hhh", report_bytes,  4)
                 sensor_data = (v1 * scalar, v2 * scalar, v3 * scalar)
             elif count == 4:
-                v1, v2, v3, v4 = unpack_from("<hhhh", report_bytes, 4)
+                v1, v2, v3, v4 = unpack_from("<hhhh", report_bytes,  4)
                 sensor_data = (v1 * scalar, v2 * scalar, v3 * scalar, v4 * scalar)
             elif count == 5:  # Note likely different scalar when implement count=5
-                v1, v2, v3, v4, e1 = unpack_from("<hhhhh", report_bytes, 4)
+                v1, v2, v3, v4, e1 = unpack_from("<hhhhh", report_bytes,  4)
                 sensor_data = (v1 * scalar, v2 * scalar, v3 * scalar, v4 * scalar, e1)
                 raise NotImplementedError(f"5-tuple Reports not supported yet,likely different scalar for e1.")
             else:
@@ -1502,7 +1504,7 @@ class BNO08X:
         # timestamp (int) units in internal time?, Celsius in float
         if report_id == BNO_REPORT_RAW_GYROSCOPE:
             raw_x, raw_y, raw_z, temp_int, time_stamp = unpack_from("<HHHhI", report_bytes, 4)
-            celsius = (temp_int / 2.0) + 23.0
+            celsius = (temp_int * 0.5) + 23.0
             sensor_data = (raw_x, raw_y, raw_z, celsius, time_stamp)
             self._report_values[report_id] = sensor_data
             return
@@ -1615,7 +1617,7 @@ class BNO08X:
                 if packet.channel != SHTP_CHAN_CONTROL:
                     self._dbg("_check_id skipping above packet\n")
                     continue
-                if packet.byte_count - 4 == 0:
+                if packet.byte_count - _SHTP_HEADER_LEN == 0:
                     continue
                 if packet.report_id == _COMMAND_RESPONSE:
                     # Handle packet to process _REPORT_PRODUCT_ID_RESPONSE reports (0xf8)
