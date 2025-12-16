@@ -241,13 +241,13 @@ DEFAULT_REPORT_FREQ = {
     BNO_REPORT_GRAVITY: 10,
     BNO_REPORT_GAME_ROTATION_VECTOR: 10,
     BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR: 10,
-    BNO_REPORT_PRESSURE: 2,
-    BNO_REPORT_AMBIENT_LIGHT: 10,
-    BNO_REPORT_HUMIDITY: 2,
-    BNO_REPORT_PROXIMITY: 10,
-    BNO_REPORT_TEMPERATURE: 2,
+    # BNO_REPORT_PRESSURE: 2,
+    # BNO_REPORT_AMBIENT_LIGHT: 10,
+    # BNO_REPORT_HUMIDITY: 2,
+    # BNO_REPORT_PROXIMITY: 10,
+    # BNO_REPORT_TEMPERATURE: 2,
     BNO_REPORT_STEP_COUNTER: 5,
-    BNO_REPORT_SHAKE_DETECTOR: 20,
+    # BNO_REPORT_SHAKE_DETECTOR: 20,
     BNO_REPORT_STABILITY_CLASSIFIER: 2,
     BNO_REPORT_ACTIVITY_CLASSIFIER: 2,
     BNO_REPORT_RAW_ACCELEROMETER: 20,
@@ -267,11 +267,53 @@ _Q_POINT_8_SCALAR = 2 ** (8 * -1)
 _Q_POINT_4_SCALAR = 2 ** (4 * -1)
 
 _REPORT_LENGTHS = {
-    _REPORT_PRODUCT_ID_RESPONSE: 16,
-    _GET_FEATURE_RESPONSE: 17,
-    _COMMAND_RESPONSE: 16,
-    _BASE_TIMESTAMP: 5,
-    _TIMESTAMP_REBASE: 5,
+    # Sensor Reports
+    BNO_REPORT_ACCELEROMETER: 10,  # 0x01
+    BNO_REPORT_GYROSCOPE: 10,  # 0x02
+    BNO_REPORT_MAGNETOMETER: 10,  # 0x03
+    BNO_REPORT_LINEAR_ACCELERATION: 10,  # 0x04
+    BNO_REPORT_ROTATION_VECTOR: 14,  # 0x05
+    BNO_REPORT_GRAVITY: 10,  # 0x06
+    BNO_REPORT_UNCALIBRATED_GYROSCOPE: 16,  # For testing #07
+    BNO_REPORT_GAME_ROTATION_VECTOR: 12,  # 0x08
+    BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR: 14,  # 0x09
+    #     BNO_REPORT_PRESSURE: 8,  #0x0a
+    #     BNO_REPORT_AMBIENT_LIGHT: 8,  #0x0b
+    #     BNO_REPORT_HUMIDITY: 6, #0x0c
+    #     BNO_REPORT_PROXIMITY: 6, #0x0d
+    #     BNO_REPORT_TEMPERATURE: 6, #0x0e
+    BNO_REPORT_UNCALIBRATED_MAGNETOMETER: 16,  # For testing,  # 0x0f
+    #     BNO_REPORT_TAP_DETECTOR: 5, # 0x10
+    BNO_REPORT_STEP_COUNTER: 12,  # 0x11
+    #     BNO_REPORT_SIGNIFICANT_MOTION: 6, # 0x12
+    BNO_REPORT_STABILITY_CLASSIFIER: 6,  # 0x13
+    BNO_REPORT_RAW_ACCELEROMETER: 16,  # 0x14
+    BNO_REPORT_RAW_GYROSCOPE: 16,  # 0x15
+    BNO_REPORT_RAW_MAGNETOMETER: 16,  # 0x16
+    #     BNO_REPORT_SAR reserved  # 0x17
+    BNO_REPORT_STEP_DETECTOR: 8,  # 0x18
+    #     BNO_REPORT_SHAKE_DETECTOR: 6,  # 0x19
+    #     BNO_REPORT_FLIP_DETECTOR: 6,  # 0x1a
+    #     BNO_REPORT_PICKUP_DETECTOR: 6,  # 0x1b
+    BNO_REPORT_STABILITY_DETECTOR: 6,  # 0x1c
+    BNO_REPORT_ACTIVITY_CLASSIFIER: 16,  # 0x1e
+    #     BNO_REPORT_SLEEP_DETECTOR: 6,   # 0x1f
+    #     BNO_REPORT_TILT_DETECTOR: 6,   # 0x20
+    #     BNO_REPORT_POCKET_DETECTOR: 6,  # 0x21
+    #     BNO_REPORT_CIRCLE_DETECTOR: 6,  #0x22
+    #     BNO_REPORT_HEART_RATE_MONITOR: 6,  #0x23
+    BNO_REPORT_ARVR_STABILIZED_ROTATION_VECTOR: 14,  # 0x28
+    BNO_REPORT_ARVR_STABILIZED_GAME_ROTATION_VECTOR: 12,  # 0x29
+    BNO_REPORT_GYRO_INTEGRATED_ROTATION_VECTOR: 14,  # 0x2a
+    #     BNO_REPORT_MOTION_REQUEST: 6,  # sent to host periodically? 0x2b
+    #     BNO_REPORT_OPTICAL_FLOW: 24,  #  0x2c
+    #     BNO_REPORT_DEAD_RECKONING: 60, #  0x2d
+    # Command Reports
+    _COMMAND_RESPONSE: 16,  # 0xf1
+    _REPORT_PRODUCT_ID_RESPONSE: 16, # 0xf8
+    _GET_FEATURE_RESPONSE: 17,  # 0xfc
+    _BASE_TIMESTAMP: 5,  # 0xfb
+    _TIMESTAMP_REBASE: 5,  #0xfa
 }
 
 # these raw reports require their counterpart to be enabled
@@ -294,48 +336,48 @@ _RESET_CAUSE_STRING = [
 ]
 
 # sensor reports (scalar, #results (without .full), bytes in sensor report packet
-_AVAIL_SENSOR_REPORTS = {
-    BNO_REPORT_ACCELEROMETER: (_Q_POINT_8_SCALAR, 3, 10),  # 0x01
-    BNO_REPORT_GYROSCOPE: (_Q_POINT_9_SCALAR, 3, 10),  # 0x02
-    BNO_REPORT_MAGNETOMETER: (_Q_POINT_4_SCALAR, 3, 10),  # 0x03
-    BNO_REPORT_LINEAR_ACCELERATION: (_Q_POINT_8_SCALAR, 3, 10),  # 0x04
-    BNO_REPORT_ROTATION_VECTOR: (_Q_POINT_14_SCALAR, 4, 14),  # 0x05
-    BNO_REPORT_GRAVITY: (_Q_POINT_8_SCALAR, 3, 10),  # 0x06
-    BNO_REPORT_UNCALIBRATED_GYROSCOPE: (_Q_POINT_9_SCALAR, 3, 16),  # For testing #07
-    BNO_REPORT_GAME_ROTATION_VECTOR: (_Q_POINT_14_SCALAR, 4, 12),  # 0x08
-    BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR: (_Q_POINT_12_SCALAR, 4, 14),  # 0x09
-    #     BNO_REPORT_PRESSURE: (1, 1, 8),  #0x0a
-    #     BNO_REPORT_AMBIENT_LIGHT: (1, 1, 8),  #0x0b
-    #     BNO_REPORT_HUMIDITY: (1, 1, 6), #0x0c
-    #     BNO_REPORT_PROXIMITY: (1, 1, 6), #0x0d
-    #     BNO_REPORT_TEMPERATURE: (1, 1, 6), #0x0e
-    BNO_REPORT_UNCALIBRATED_MAGNETOMETER: (_Q_POINT_4_SCALAR, 3, 16),  # For testing,  # 0x0f
-    #     BNO_REPORT_TAP_DETECTOR: (1, 1, 5), # 0x10
-    BNO_REPORT_STEP_COUNTER: (1, 1, 12),  # 0x11
-    #     BNO_REPORT_SIGNIFICANT_MOTION: (1, 1, 6), # 0x12
-    BNO_REPORT_STABILITY_CLASSIFIER: (1, 1, 6),  # 0x13
-    BNO_REPORT_RAW_ACCELEROMETER: (1, 3, 16),  # 0x14
-    BNO_REPORT_RAW_GYROSCOPE: (1, 3, 16),  # 0x15
-    BNO_REPORT_RAW_MAGNETOMETER: (1, 3, 16),  # 0x16
+_SENSOR_SCALING = {
+    BNO_REPORT_ACCELEROMETER: (_Q_POINT_8_SCALAR, 3),  # 0x01
+    BNO_REPORT_GYROSCOPE: (_Q_POINT_9_SCALAR, 3),  # 0x02
+    BNO_REPORT_MAGNETOMETER: (_Q_POINT_4_SCALAR, 3),  # 0x03
+    BNO_REPORT_LINEAR_ACCELERATION: (_Q_POINT_8_SCALAR, 3),  # 0x04
+    BNO_REPORT_ROTATION_VECTOR: (_Q_POINT_14_SCALAR, 4),  # 0x05
+    BNO_REPORT_GRAVITY: (_Q_POINT_8_SCALAR, 3),  # 0x06
+    BNO_REPORT_UNCALIBRATED_GYROSCOPE: (_Q_POINT_9_SCALAR, 3),  # For testing #07
+    BNO_REPORT_GAME_ROTATION_VECTOR: (_Q_POINT_14_SCALAR, 4),  # 0x08
+    BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR: (_Q_POINT_12_SCALAR, 4),  # 0x09
+    #     BNO_REPORT_PRESSURE: (1, 1),  #0x0a
+    #     BNO_REPORT_AMBIENT_LIGHT: (1, 1),  #0x0b
+    #     BNO_REPORT_HUMIDITY: (1, 1), #0x0c
+    #     BNO_REPORT_PROXIMITY: (1, 1), #0x0d
+    #     BNO_REPORT_TEMPERATURE: (1, 1), #0x0e
+    BNO_REPORT_UNCALIBRATED_MAGNETOMETER: (_Q_POINT_4_SCALAR, 3),  # For testing,  # 0x0f
+    #     BNO_REPORT_TAP_DETECTOR: (1, 1), # 0x10
+    BNO_REPORT_STEP_COUNTER: (1, 1),  # 0x11
+    #     BNO_REPORT_SIGNIFICANT_MOTION: (1, 1), # 0x12
+    BNO_REPORT_STABILITY_CLASSIFIER: (1, 1),  # 0x13
+    BNO_REPORT_RAW_ACCELEROMETER: (1, 3),  # 0x14
+    BNO_REPORT_RAW_GYROSCOPE: (1, 3),  # 0x15
+    BNO_REPORT_RAW_MAGNETOMETER: (1, 3),  # 0x16
     #     BNO_REPORT_SAR reserved  # 0x17
-    BNO_REPORT_STEP_DETECTOR: (1, 1, 8),  # 0x18
-    #     BNO_REPORT_SHAKE_DETECTOR: (1, 1, 6),  # 0x19
-    #     BNO_REPORT_FLIP_DETECTOR: (1, 1, 6),  # 0x1a
-    #     BNO_REPORT_PICKUP_DETECTOR: (1, 1, 6),  # 0x1b
-    BNO_REPORT_STABILITY_DETECTOR: (1, 1, 6),  # 0x1c
+    BNO_REPORT_STEP_DETECTOR: (1, 1),  # 0x18
+    #     BNO_REPORT_SHAKE_DETECTOR: (1, 1),  # 0x19
+    #     BNO_REPORT_FLIP_DETECTOR: (1, 1),  # 0x1a
+    #     BNO_REPORT_PICKUP_DETECTOR: (1, 1),  # 0x1b
+    BNO_REPORT_STABILITY_DETECTOR: (1, 1),  # 0x1c
     # 0x1d ???
-    BNO_REPORT_ACTIVITY_CLASSIFIER: (1, 1, 16),  # 0x1e
-    #     BNO_REPORT_SLEEP_DETECTOR: (1, 1, 6),   # 0x1f
-    #     BNO_REPORT_TILT_DETECTOR: (1, 1, 6),   # 0x20
-    #     BNO_REPORT_POCKET_DETECTOR: (1, 1, 6),  # 0x21)
-    #     BNO_REPORT_CIRCLE_DETECTOR: (1, 1, 6),  #0x22)
-    #     BNO_REPORT_HEART_RATE_MONITOR: (1, 1, 6),  #0x23
-    BNO_REPORT_ARVR_STABILIZED_ROTATION_VECTOR: (_Q_POINT_14_SCALAR, 5, 14),  # 0x28, note est acc QPoint 12 ?
-    BNO_REPORT_ARVR_STABILIZED_GAME_ROTATION_VECTOR: (_Q_POINT_14_SCALAR, 4, 12),  # 0x29
-    BNO_REPORT_GYRO_INTEGRATED_ROTATION_VECTOR: (_Q_POINT_14_SCALAR, 4, 14),  # #2a
-    #     BNO_REPORT_MOTION_REQUEST: (1, 1, 6),  # sent to host periodically? 0x2b
-    #     BNO_REPORT_OPTICAL_FLOW: (1 ,1, 24),  #  0x2c
-    #     BNO_REPORT_DEAD_RECKONING: (1 ,1, 60), #  0x2d
+    BNO_REPORT_ACTIVITY_CLASSIFIER: (1, 1),  # 0x1e
+    #     BNO_REPORT_SLEEP_DETECTOR: (1, 1),   # 0x1f
+    #     BNO_REPORT_TILT_DETECTOR: (1, 1),   # 0x20
+    #     BNO_REPORT_POCKET_DETECTOR: (1, 1),  # 0x21)
+    #     BNO_REPORT_CIRCLE_DETECTOR: (1, 1),  #0x22)
+    #     BNO_REPORT_HEART_RATE_MONITOR: (1, 1),  #0x23
+    BNO_REPORT_ARVR_STABILIZED_ROTATION_VECTOR: (_Q_POINT_14_SCALAR, 5),  # 0x28, note est acc QPoint 12 ?
+    BNO_REPORT_ARVR_STABILIZED_GAME_ROTATION_VECTOR: (_Q_POINT_14_SCALAR, 4),  # 0x29
+    BNO_REPORT_GYRO_INTEGRATED_ROTATION_VECTOR: (_Q_POINT_14_SCALAR, 4),  # #2a
+    #     BNO_REPORT_MOTION_REQUEST: (1, 1),  # sent to host periodically? 0x2b
+    #     BNO_REPORT_OPTICAL_FLOW: (1 ,1),  #  0x2c
+    #     BNO_REPORT_DEAD_RECKONING: (1 ,1), #  0x2d
 }
 
 # uctypes layout for standard BNO08x sensor reports
@@ -832,8 +874,6 @@ class BNO08X:
         self._dcd_saved_at: float = -1
         self._me_calibration_started_at: float = -1.0
         self._calibration_started = False
-        # self._wait_for_initialize = True
-        self._in_handle = False
         self._product_id_received = False
         self._reset_mismatch = False  # if reset_pin set make sure hardware reset done, else pin bad
 
@@ -1078,8 +1118,8 @@ class BNO08X:
     def tare(self, axis=0x07, basis=None) -> int:
         """
         Tare the sensor
-        axis 0x07 (Z,Y,X). Re-orient all motion outputs (accel, gyro, mag, &rotation vectors)
-        axis 0x04 (Z-only). changes the heading, but not the tilt
+           axis 0x07 (Z,Y,X). Re-orient all motion outputs (accel, gyro, mag, &rotation vectors)
+           axis 0x04 (Z-only). changes the heading, but not the tilt
 
         Rotation Vector or Geomagnetic Rotation Vector will reorient all motion outputs.
            0: quaternion
@@ -1136,9 +1176,7 @@ class BNO08X:
         """Save the Tare data to flash"""
         self._dbg(f"TARE Persist data to flash...")
         self._send_me_command(_ME_TARE_COMMAND,
-                              [
-                                  _ME_PERSIST_TARE,  # Persist Tare
-                                  0, 0, 0, 0, 0, 0, 0, 0, ]  # 1-8 Reserved
+                              [_ME_PERSIST_TARE, 0, 0, 0, 0, 0, 0, 0, 0,]  # 0: command, 1-8 Reserved
                               )
         return
 
@@ -1262,62 +1300,32 @@ class BNO08X:
         Split a single packet into multiple reports and process them in FIFO order.
         Handles multiple 0xF8 Product ID Response reports correctly.
         """
-        if self._in_handle:
-            return
-
-        self._in_handle = True
         data_length = len(packet.packet_sh2)
+        next_byte_index = 4  # offset to skip over SHTP header
+        report_count = 0
 
-        try:
-            # offsets to skip over SHTP header
-            next_byte_index = 4
-            report_count = 4
+        while next_byte_index < data_length:
+            report_id = packet.packet_sh2[next_byte_index]
+            required_bytes = _REPORT_LENGTHS.get(report_id, 0)
 
-            while next_byte_index < data_length:
-                report_id = packet.packet_sh2[next_byte_index]
+            if required_bytes == 0:
+                self._dbg(f"UNSUPPORTED Report ID {hex(report_id)} at offset {next_byte_index}, ** SKIPPING ONE BYTE")
+                next_byte_index += 1
+                continue
 
-                if report_id <= 0x2d:  # highest in SH-2 reference, many unimplemented
-                    # TODO: consider removing try
-                    try:
-                        required_bytes = _AVAIL_SENSOR_REPORTS[report_id][2]
-                    except:
-                        self._dbg(f"INVALID REPORT ID in_handle_packet {report_id} {hex(report_id)=}")
-                        self._dbg(f"Invalid Report Id {next_byte_index=}, next 6 bytes follows:")
-                        self._dbg(
-                            f"_handle_packet: {[hex(x) for x in packet.packet_sh2[next_byte_index: next_byte_index + 8]]}")
+            unprocessed_byte_count = data_length - next_byte_index
+            if unprocessed_byte_count < required_bytes:
+                self._dbg(f"Unprocessable truncated batch ERROR: {unprocessed_byte_count} bytes")
+                break
 
-                        # todo remove after debut, don't like skipping
-                        print(f"INVALID REPORT ID in_handle_packet {report_id} {hex(report_id)=}")
-                        print(f"INVALID REPORT ID {next_byte_index=}, up to 8 bytes follow:")
-                        print(
-                            f"_handle_packet: {[hex(x) for x in packet.packet_sh2[next_byte_index: next_byte_index + 8]]}")
-                        raise NotImplementedError(f"Un-implemented Report ({hex(report_id)=}) not supported yet.")
-                else:
-                    required_bytes = _REPORT_LENGTHS.get(report_id, 0)
-                    if required_bytes == 0:
-                        self._dbg(f"Unknown report_id {hex(report_id)}, skipping 1 byte")
-                        next_byte_index += 1
-                        continue
+            report_view = packet.packet_sh2[next_byte_index: next_byte_index + required_bytes]
+            self._process_report(report_id, report_view)
+            report_count += 1
+            next_byte_index += required_bytes
 
-                unprocessed_byte_count = data_length - next_byte_index
-                if unprocessed_byte_count < required_bytes:
-                    self._dbg(f"Unprocessable batch ERROR: skipping ! {unprocessed_byte_count} bytes")
-                    break
+        # * commented out self._dbg in time critical loops
+        # self._dbg(f"HANDLING {report_count} PACKET{'S' if report_count > 1 else ''}...")
 
-                report_view = packet.packet_sh2[next_byte_index: next_byte_index + required_bytes]
-
-                self._process_report(report_id, report_view)
-                report_count += 1
-                next_byte_index += required_bytes
-
-            # * commented out self._dbg in time critical loops
-            # self._dbg(f"HANDLING {report_count} PACKET{'S' if report_count > 1 else ''}...")
-
-        except Exception as error:
-            self._dbg(f"Handle Packet: Packet bytes:{[hex(b) for b in packet.packet_sh2[:4]]}...")
-            raise
-        finally:
-            self._in_handle = False
 
     def _handle_control_report(self, report_id: int, report_bytes: bytearray) -> None:
         """
@@ -1405,7 +1413,7 @@ class BNO08X:
         # handle typical sensor reports first
         if 0x01 <= report_id <= 0x09:
             # uctypes-based sensor reports, Parses 3-tuple, 4-tuple, and 5-tuple
-            scalar, count, _ = _AVAIL_SENSOR_REPORTS[report_id]
+            scalar, count = _SENSOR_SCALING[report_id]
 
             if count == 3:
                 v1, v2, v3 = unpack_from("<hhh", report_bytes, 4)
