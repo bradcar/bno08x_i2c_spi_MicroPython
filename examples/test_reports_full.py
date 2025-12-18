@@ -6,11 +6,12 @@
 # acceleration.full, magnetic.full, gryo.full, quaternion.full, quaternion.euler_full
 # full reports with accuracy and timestamps
 #
-# Enabling reports at 100Hz, and the sensors provides frequencies close to what was requested.
+# Enabling reports at high frequencies 100Hz, some sensors can not run at this rate
+# sensor provides frequencies close to what was requested
 #
 # Conditionals added to only print data if sensor report updated.
 #
-# Print statements slow processing, max period is ~18ms even though report at 8ms to 10ms.
+# any prints slow processing, max period is ~18ms even though report at 8ms to 10ms.
 
 from bno08x import *
 from i2c import BNO08X_I2C
