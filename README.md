@@ -167,13 +167,32 @@ You can request different frequecies and the BNO08X will pick the closest freque
 See the seletion below (_Details on Report Frequencies_) for more details.
 If your code requests reports faster than the report feature frequency specified, repeated values will be returned.
 
+## Sensor reports - next iteration
+
+Each reading of sensor reports, example bno.gyro, will return the most recent value. 
+If the sensor has not started, it returns a value of zero. If the sensor has not updated, the last value is returned again.
+To check for new data, use the .updated modifier for any sensor call, then get the value.
+
+    bno.update_sensors()
+    if bno.quaternion.updated:
+        quat_i, quat_j, quat_k, quat_real, acc, ts_ms = bno.quaternion.full
+
+    if bno.gyro.updated:
+        gyro_x, gyro_y, gyro_z, acc, ts_ms = bno.gyro.full
+
+The bno.update_sensors() returns the number of sensor reports received since the last call.
+This count includes all enabled sensors and repeated updates from the same sensor.
+Only the most recent report for each sensor is stored and returned.
+
 ## Euler Angles, Gimbal Lock, and Quaternions
 
-Euler angles have a problem with Gimbal Lock. With Euler angles, a loss of a degree of freedom occurs when two
-rotational axes align, which means certain orientations have multiple representations. 
-There was a famous example of this on Apollo 11.
-Quaternions avoid this by providing a unique representation for every possible orientation problem.
-Quaternions use several rotation around a single axis and an angle.
+Euler angles suffer from a well-known issue called Gimbal Lock.
+Gimbal lock occurs when two rotation axes align, which removes one degree of freedom. When a degree of freedom is
+lost, some orientations will have multiple valid representations.
+A well-known example occurred during the Apollo 11 mission.
+Quaternions avoid this by providing a unique representation for every possible orientation.
+Quaternions represents rotation with multiple "single axis and rotation angles".
+Most computer games use this implementation for smooth and predictable graphics.
 
 - https://base.movella.com/s/article/Understanding-Gimbal-Lock-and-how-to-prevent-it?language=en_US
 - https://en.wikipedia.org/wiki/Gimbal_lock
