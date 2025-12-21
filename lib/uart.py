@@ -38,9 +38,10 @@ In UART mode, the BNO08X sends an advertisement message when it is ready to comm
 
 from struct import pack_into
 
+import micropython
 import uctypes
 from machine import Pin
-from utime import sleep_ms, sleep_us, ticks_ms, ticks_diff
+from utime import sleep_ms, sleep_us, ticks_ms, ticks_us, ticks_diff
 
 from bno08x import BNO08X, Packet, PacketError
 
@@ -82,30 +83,100 @@ class BNO08X_UART(BNO08X):
         # wake_pin must be NONE!  wake_pin/PS0 = 0 (gnd)
         super().__init__(_interface, reset_pin=reset_pin, int_pin=int_pin, cs_pin=None, wake_pin=None, debug=debug)
 
-    def _wait_for_int(self):
-        """
-        Waits for the BNO08x int_pin to assert (go low) by monitoring 
-        the change in the microsecond timestamp set by the ISR.
-        """
-        initial_int_time = self.last_interrupt_us
-        start_time = ticks_ms()
-
-        # Check if the interrupt is already active (was missed)
+#     def _wait_for_int(self):
+#         """
+#         Waits for the BNO08x int_pin to assert (go low) by monitoring 
+#         the change in the microsecond timestamp set by the ISR.
+#         """
+#         initial_int_time = self.last_interrupt_us
+#         start_time = ticks_ms()
+# 
+#         # Check if the interrupt is already active (was missed)
+#         if self._int_pin.value() == 0:
+#             # * comment out self._dbg for normal operation, adds delay even with debug=False
+#             # self._dbg("int_piun is active low (0) on entry.")
+#             return 
+#         
+#         # Poll the interrupt timestamp for a change
+#         while ticks_diff(ticks_ms(), start_time) < 10: 
+#             if self.last_interrupt_us != initial_int_time:
+#                 return 
+#             sleep_us(100)
+#         
+#         raise RuntimeError(f"_wait_for_int timeout ({ticks_diff(ticks_ms(), start_time)}ms) waiting for int_pin")
+    @micropython.native
+    def _wait_for_int(self, timeout_us=1000):
         if self._int_pin.value() == 0:
-            # * comment out self._dbg for normal operation, adds delay even with debug=False
-            # self._dbg("int_piun is active low (0) on entry.")
-            return 
+            return
+
+        start = ticks_us()
+        # Check the raw pin value directly
+        while True:
+            if self._int_pin.value() == 0:
+                return
+            
+            if ticks_diff(ticks_us(), start) > timeout_us:
+                break
+                
+        raise RuntimeError("BNO08X UART _wait_for_int Timeout: 1ms exceeded")
+    
+
+    def _soft_reset(self):
+        """
+        UART has its own Soft reset,
+        Sends the 0x01 'reset' command over Channel 1 (Executable) 
+        to initiate a BNO08X firmware restart.
         
-        # Poll the interrupt timestamp for a change
-        while ticks_diff(ticks_ms(), start_time) < 10: 
-            if self.last_interrupt_us != initial_int_time:
-                return 
-            sleep_us(100)
-        
-        raise RuntimeError(f"_wait_for_int timeout ({ticks_diff(ticks_ms(), start_time)}ms) waiting for int_pin")
+        Section 1.3.1 SHTP states: The executable channel (channel=1) allows the host to reset the BNO08X
+        and provide details of its operating mode. use write 1 – reset, read 1 - reset complete.
+       """
+        self._dbg("*** Soft Reset in UART , using Channel 1 command, starting...")
+
+        # Reset Command: Payload: 0x01 ('reset' command), sent on BNO_CHANNEL_EXE1 (1)
+        reset_payload = bytearray([0x01])
+        self._send_packet(0x01, reset_payload)
+
+        # flush any uart data leftover from the previous run before the reset
+        while self._uart.any():
+            self._uart.read(self._uart.any())
+        self._dbg("*** Cleared stale UART buffer during reset")
+        sleep_ms(500)
+
+        self._dbg("End Soft RESET in uart.py")
+
+    def _hard_reset(self) -> None:
+        """
+        Hardware reset the sensor to an initial state
+        UART handles SHTP protocol and must evaluate command packet response
+        """
+        if not self._reset_pin:
+            return
+
+        while self._uart.any():
+            self._uart.read(self._uart.any())
+        self._dbg("*** UART Cleared stale UART buffer before reset")
+
+        self._dbg("*** UART Hard Reset starting...")
+        self._reset_pin.value(1)
+        sleep_ms(10)
+        self._reset_pin.value(0)
+        sleep_us(10)  # sleep_us(1), data sheet say only 10ns required,
+        self._reset_pin.value(1)
+        sleep_ms(300)  # data sheet 6.5.3 Startup timing implies 94 ms needed
+
+        # flush any uart data leftover from the previous run before the reset
+        while self._uart.any():
+            self._uart.read(self._uart.any())
+        self._dbg("*** UART Cleared stale UART buffer after reset")
+
+        self._dbg("*** Hard Reset End in UART, awaiting acknowledgement (0xf8)")
+
+    def _wake_signal(self):
+        """UART has no wake signal, when called in the base class this is a noop"""
+        pass
 
     def _send_packet(self, channel, data):
-        """ 1.2.3.1 UART Operation: Bytes sent to the BNO08X must be separated by at least 100us."""
+        """ 1.2.3.1 UART Operation:"Bytes sent to the BNO08X must be separated by at least 100us."""
         seq = self._tx_sequence_number[channel]
         data_length = len(data)
         write_length = data_length + 4
@@ -175,11 +246,11 @@ class BNO08X_UART(BNO08X):
             if self._uart.any() == 0:
                 self._wait_for_int() # Will raise a timeout if no new interrupt after 10ms
 
-        # Buffer for Read 4-byte SHTP header and process
+        # Buffer for Read of 4-byte SHTP header and later payload
         header_mv = memoryview(self._data_buffer)[:4]
 
         # ---start--- UART Header read - handle SHTP protocol: 
-        # UART wait till read 0x7E start byte
+        # UART read until read 0x7E start byte
         start_time_read = ticks_ms()
         while True:
             data = self._uart.read(1)
@@ -202,17 +273,17 @@ class BNO08X_UART(BNO08X):
 
         header_view = uctypes.struct(uctypes.addressof(self._data_buffer), _HEADER_STRUCT, uctypes.LITTLE_ENDIAN)
         raw_packet_bytes = header_view.packet_bytes
+        if raw_packet_bytes == 0:  # fast return if 0 payload
+            # self._dbg("_read_packet: packet_bytes=0, returning None.")
+            return None
+        
         channel = header_view.channel
         seq = header_view.sequence
-        
         # * comment out self._dbg for normal operation, adds delay even with debug=False
         # self._dbg(f" _read_packet Header {hex(raw_packet_bytes)}, {channel=}, {seq=}")
 
         self._rx_sequence_number[channel] = seq  # SH2 Sequence number
 
-        if raw_packet_bytes == 0:  # skip 0 lenght
-            self._dbg("_read_packet: packet_bytes=0, returning None.")
-            return None
         if raw_packet_bytes == 0xFFFF:  # bad sensor data 
             raise OSError(f"FATAL BNO08X Error: Invalid SHTP header(0xFFFF), BNO08x sensor corrupted?")
 
@@ -260,60 +331,6 @@ class BNO08X_UART(BNO08X):
         # self._dbg(f" Received Packet *************{new_packet}")
 
         return new_packet
-
-    def _soft_reset(self):
-        """
-        UART has its own Soft reset,
-        Sends the 0x01 'reset' command over Channel 1 (Executable) 
-        to initiate a BNO08X firmware restart.
-        
-        Section 1.3.1 SHTP states: The executable channel (channel=1) allows the host to reset the BNO08X
-        and provide details of its operating mode. use write 1 – reset, read 1 - reset complete.
-       """
-        self._dbg("*** Soft Reset in UART , using Channel 1 command, starting...")
-
-        # Reset Command: Payload: 0x01 ('reset' command), sent on BNO_CHANNEL_EXE1 (1)
-        reset_payload = bytearray([0x01])
-        self._send_packet(0x01, reset_payload)
-
-        # flush any uart data leftover from the previous run before the reset
-        while self._uart.any():
-            self._uart.read(self._uart.any())
-        self._dbg("*** Cleared stale UART buffer during reset")
-        sleep_ms(500)
-
-        self._dbg("End Soft RESET in uart.py")
-
-    def _hard_reset(self) -> None:
-        """
-        Hardware reset the sensor to an initial state
-        UART handles SHTP protocol and must evaluate command packet response
-        """
-        if not self._reset_pin:
-            return
-
-        while self._uart.any():
-            self._uart.read(self._uart.any())
-        self._dbg("*** UART Cleared stale UART buffer before reset")
-
-        self._dbg("*** UART Hard Reset starting...")
-        self._reset_pin.value(1)
-        sleep_ms(10)
-        self._reset_pin.value(0)
-        sleep_us(10)  # sleep_us(1), data sheet say only 10ns required,
-        self._reset_pin.value(1)
-        sleep_ms(300)  # data sheet 6.5.3 Startup timing implies 94 ms needed
-
-        # flush any uart data leftover from the previous run before the reset
-        while self._uart.any():
-            self._uart.read(self._uart.any())
-        self._dbg("*** UART Cleared stale UART buffer after reset")
-
-        self._dbg("*** Hard Reset End in UART, awaiting acknowledgement (0xf8)")
-
-    def _wake_signal(self):
-        """UART has no wake signal, when called in the base class this is a noop"""
-        pass
 
     @property
     def _data_ready(self):
