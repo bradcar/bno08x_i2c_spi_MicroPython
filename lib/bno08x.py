@@ -89,12 +89,12 @@ from micropython import const
 from utime import ticks_ms, ticks_us, ticks_diff, sleep_ms, sleep_us
 
 # Commands
-SHTP_CHAN_COMMAND = const(0)
-SHTP_CHAN_EXE = const(1)
-SHTP_CHAN_CONTROL = const(2)
-SHTP_CHAN_INPUT = const(3)
-SHTP_CHAN_WAKE_INPUT = const(4)
-BNO_CHAN_GYRO_ROTATION_VECTOR = const(5)
+SHTP_CHAN_COMMAND = const(0)  # Advertisement, request & response
+SHTP_CHAN_EXE = const(1)  # Soft reset, execute & complete (not acknowledge)
+SHTP_CHAN_CONTROL = const(2)  # Reports 0xf1 to 0xfe, request & response
+SHTP_CHAN_INPUT = const(3)  # sensor reports 0x01 to 0x2d, data output
+SHTP_CHAN_WAKE_INPUT = const(4)  # used by wake-up sensors - Not implemented
+BNO_CHAN_GYRO_ROTATION_VECTOR = const(5)  # high-priority head tracking - Not implementd
 
 channels = {
     0x0: "SHTP_CHAN_COMMAND",
@@ -331,7 +331,7 @@ _REPORT_LENGTHS = {
     #     BNO_REPORT_DEAD_RECKONING: 60, #  0x2d
     # Command Reports
     _COMMAND_RESPONSE: 16,  # 0xf1
-    _REPORT_PRODUCT_ID_RESPONSE: 16, # 0xf8
+    _REPORT_PRODUCT_ID_RESPONSE: 16,  # 0xf8
     _GET_FEATURE_RESPONSE: 17,  # 0xfc
     _BASE_TIMESTAMP: 5,  # 0xfb
     _TIMESTAMP_REBASE: 5,  #0xfa
@@ -499,16 +499,13 @@ class Packet:
         outstr += f"DBG::\t\t Packet Len: {length} ({hex(length)})\n"
         outstr += f"DBG::\t\t Channel: {channels[self.channel]} ({hex(self.channel)})\n"
         outstr += f"DBG::\t\t Sequence: {self.seq}\n"
-
-        if self.channel in {SHTP_CHAN_CONTROL, SHTP_CHAN_INPUT, }:
-            if self.report_id in _REPORTS_DICTIONARY:
-                outstr += f"DBG::\t\t Report Type: {_REPORTS_DICTIONARY[self.report_id]} ({hex(self.report_id)})\n"
-            else:
-                outstr += f"DBG::\t\t \t** UNKNOWN Report Type **: {hex(self.report_id)}\n"
+        if self.channel == SHTP_CHAN_INPUT:
+            report_name = _REPORTS_DICTIONARY.get(self.report_id)
+            outstr += f"DBG::\t\t Report Type: {report_name} ({hex(self.report_id)})\n"
+        if self.channel == SHTP_CHAN_CONTROL:
             if self.report_id == 0xFC and length - _SHTP_HEADER_LEN >= 6 and self.report_id in _REPORTS_DICTIONARY:
                 # first report_id (self.data[0]), the report type to be enabled (self.data[1])
                 outstr += f"DBG::\t\t Feature Enabled: {_REPORTS_DICTIONARY[self.packet_sh2[5]]} ({hex(self.packet_sh2[5])})\n"
-
         outstr += "\nDBG::\t\tData:\n"
         outstr += f"DBG::\t\t Data Len: {length - _SHTP_HEADER_LEN}"
         for idx, packet_byte in enumerate(self.packet_sh2[4:length]):
@@ -662,7 +659,7 @@ class SensorFeature1:
     def enable(self, hertz=None):
         """Method to enable the feature with a given report rate (hertz)."""
         return self._bno.enable_feature(self.feature_id, hertz)
-    
+
     @property
     def updated(self):
         if self._bno._unread_report_count.get(self.feature_id, 0) > 0:
@@ -726,7 +723,7 @@ class SensorFeature3:
     def enable(self, hertz=None):
         """Method to enable the feature with a given report rate (hertz)."""
         return self._bno.enable_feature(self.feature_id, hertz)
-    
+
     @property
     def updated(self):
         if self._bno._unread_report_count.get(self.feature_id, 0) > 0:
@@ -865,7 +862,7 @@ class RawSensorFeature:
     def enable(self, hertz=None):
         """Method to enable the feature with a given report rate (hertz)."""
         return self._bno.enable_feature(self.feature_id, hertz)
-    
+
     @property
     def updated(self):
         if self._bno._unread_report_count.get(self.feature_id, 0) > 0:
@@ -982,7 +979,10 @@ class BNO08X:
         self._data_available = True
 
     def reset_sensor(self):
-        """ After power on, sensor seems to require hard reset, soft reset may be useful after hard reset """
+        """ After power on, sensor seems to require hard reset, soft reset may be useful after hard reset."""
+        self._product_id_received = False
+        self._reset_mismatch = False  # if reset_pin set make sure hardware reset done, else pin bad
+
         if self._reset_pin:
             self._hard_reset()
             reset_type = "Hard"
@@ -990,8 +990,34 @@ class BNO08X:
             self._soft_reset()
             reset_type = "Soft"
 
+        self._dbg("********** Check ID **********")
+        self._dbg(f"Send PRODUCT_ID_REQUEST (0xf9) on channel 2, await Product ID 0xF8 response")
+        data = bytearray(2)
+        data[0] = _REPORT_PRODUCT_ID_REQUEST
+        data[1] = 0
+        self._wake_signal()
+        self._send_packet(SHTP_CHAN_CONTROL, data)
+
+        # Process packets until the ID appears
+        #         start = ticks_ms()
+        #         while not self._product_id_received and ticks_diff(ticks_ms(), start) < 1000:
+        #             self._parse_packets()
+        #
+        #         if self._product_id_received and not self._reset_mismatch:
+        #             self._dbg(f"*** {reset_type} reset successful, acknowledged with Product ID 0xF8 response")
+        #             self._tx_sequence_number = [0, 0, 0, 0, 0, 0]
+        #             self._rx_sequence_number = [0, 0, 0, 0, 0, 0]
+        #             return
+        #
+        #         if self._reset_mismatch:
+        #             raise RuntimeError("{reset_type} reset cause mismatch; check reset_pin wiring")
+        #
+        #         raise RuntimeError("{reset_type} reset not acknowledged, check BNO086 wiring")
+
+        #################################
+
         if self._check_id() and not self._reset_mismatch:
-            self._dbg(f"*** {reset_type} reset successful, acknowledged with 0xF8 response")
+            self._dbg(f"*** {reset_type} reset successful, acknowledged with Product ID 0xF8 response")
             sleep_ms(100)  # allow SHTP time to settle
             self._tx_sequence_number = [0, 0, 0, 0, 0, 0]
             self._rx_sequence_number = [0, 0, 0, 0, 0, 0]
@@ -1229,7 +1255,7 @@ class BNO08X:
         """Save the Tare data to flash"""
         self._dbg(f"TARE Persist data to flash...")
         self._send_me_command(_ME_TARE_COMMAND,
-                              [_ME_PERSIST_TARE, 0, 0, 0, 0, 0, 0, 0, 0,]  # 0: command, 1-8 Reserved
+                              [_ME_PERSIST_TARE, 0, 0, 0, 0, 0, 0, 0, 0, ]  # 0: command, 1-8 Reserved
                               )
         return
 
@@ -1301,7 +1327,7 @@ class BNO08X:
         """ Parse packets and handle reports while data-ready is active."""
         processed_count = 0
         max_packets = _MAX_PACKET_PROCESS
-        end_time = ticks_ms() + 10  #10ms guard time
+        end_time = ticks_ms() + 10  # 10ms guard time
         report_length_map = _REPORT_LENGTHS
 
         while self._data_ready and processed_count < max_packets:
@@ -1312,11 +1338,11 @@ class BNO08X:
             packet = self._read_packet(wait=False)
             if packet is None:
                 break
-            
+
             processed_count += 1
             packet_sh2 = packet.packet_sh2
             data_length = len(packet_sh2)
-            
+
             if data_length > 0 and packet_sh2[0] == 0x00:
                 processed_count += 1
                 continue
@@ -1344,7 +1370,6 @@ class BNO08X:
             # --- END INLINED _handle_packet  ---
 
         return processed_count
-
 
     def _handle_packet(self, packet):
         """
@@ -1376,7 +1401,7 @@ class BNO08X:
 
         # * commented out self._dbg in time critical loops
         # self._dbg(f"HANDLING {report_count} PACKET{'S' if report_count > 1 else ''}...")
-        
+
     def _wait_for_packet(self, channel, report_id=None, timeout=0.5, handle_packet=True):
         """ Wait for a specifc packet to be received on channel, ignore others """
         start_time = ticks_ms()
@@ -1400,7 +1425,6 @@ class BNO08X:
             f"Timed out waiting for packet on channel {channel} with ReportID {report_id} after {timeout}s"
         )
 
-
     def _handle_control_report(self, report_id: int, report_bytes: bytearray) -> None:
         """
         Handle control reports. Handle time-critical Timestamp methods first
@@ -1411,27 +1435,26 @@ class BNO08X:
         # Base Timestamp (0xfb)
         if report_id == _BASE_TIMESTAMP:
             self._last_base_timestamp_us = unpack_from("<I", report_bytes, 1)[0] * 100
-
-            # remove self._dbg from time critical operations
-            # self._dbg(f"Base Timestamp (0xfb): {self._last_base_timestamp_us} usec")
             return
 
-        # Timestamp Rebase (0xfa), see this when _BASE_TIMESTAMP wraps so use this instead
+        # Timestamp Rebase (0xfa), this sent when _BASE_TIMESTAMP wraps
         if report_id == _TIMESTAMP_REBASE:
             self._last_base_timestamp_us = unpack_from("<I", report_bytes, 1)[0] * 100
-
-            # remove self._dbg from time critical operations
-            # self._dbg(f"Timestamp Rebase (0xfa): {self._last_base_timestamp_us} usec")
             return
 
-        # Feature response (0xfc) - This report issued when feature is enabled
+        # Feature response (0xfc) - This report issued when feature is enabled or updated
         if report_id == _GET_FEATURE_RESPONSE:
             _report_id, feature_report_id = unpack_from("<BB", report_bytes)
+            report_interval = unpack_from("<I", report_bytes, 5)[0]
             self._report_values[feature_report_id] = _INITIAL_REPORTS.get(feature_report_id, (0.0, 0.0, 0.0, 0, 0.0))
             self._unread_report_count[feature_report_id] = 0
+            self._report_periods_dictionary_us[feature_report_id] = report_interval
+            self._dbg(f"Report update: {_REPORTS_DICTIONARY[feature_report_id]}: {hex(feature_report_id)}")
+            self._dbg(f" Initialize tuple={self._report_values}")
+            self._dbg(f" Report Interval: {report_interval / 1000.0:.1f} ms\n")
             return
 
-        # Command Response (0xF1) - ME and DCD
+        # Command Response (0xf1) - ME and DCD, can also head 0xf8 responses for i2c and spi
         if report_id == _COMMAND_RESPONSE:
             self._handle_command_response(report_bytes)
             return
@@ -1450,7 +1473,7 @@ class BNO08X:
             self._dbg(f"*** Software Version: {sw_major}.{sw_minor}.{sw_patch}")
             self._dbg(f"\tBuild: {sw_build_number}\n")
 
-            # only first Product ID Response report has reset cause, reset_pin should reset_cause=4
+            # only first Product ID Response report has reset cause, HW reset_cause=4
             if not self._product_id_received:
                 if reset_cause != 4:
                     self._reset_mismatch = True
@@ -1462,6 +1485,7 @@ class BNO08X:
         report_body = unpack_from("<BBBBB", report_bytes)
         response = unpack_from("<BBBBBBBBBBB", report_bytes, 5)
         (_report_id, _seq_number, command, _command_seq_number, _response_seq_number,) = report_body
+        self._dbg(f"***Command response 0xf1")
 
         cal_status, accel_en, gyro_en, mag_en, planar_en, table_en, *_reserved = response
 
@@ -1490,13 +1514,13 @@ class BNO08X:
             scalar, count = _SENSOR_SCALING[report_id]
 
             if count == 3:
-                v1, v2, v3 = unpack_from("<hhh", report_bytes,  4)
+                v1, v2, v3 = unpack_from("<hhh", report_bytes, 4)
                 sensor_data = (v1 * scalar, v2 * scalar, v3 * scalar)
             elif count == 4:
-                v1, v2, v3, v4 = unpack_from("<hhhh", report_bytes,  4)
+                v1, v2, v3, v4 = unpack_from("<hhhh", report_bytes, 4)
                 sensor_data = (v1 * scalar, v2 * scalar, v3 * scalar, v4 * scalar)
             elif count == 5:  # Note likely different scalar when implement count=5
-                v1, v2, v3, v4, e1 = unpack_from("<hhhhh", report_bytes,  4)
+                v1, v2, v3, v4, e1 = unpack_from("<hhhhh", report_bytes, 4)
                 sensor_data = (v1 * scalar, v2 * scalar, v3 * scalar, v4 * scalar, e1)
                 raise NotImplementedError(f"5-tuple Reports not supported yet,likely different scalar for e1.")
             else:
@@ -1619,10 +1643,9 @@ class BNO08X:
             packet_response = report_bytes.packet_sh2
             fid = packet_response[5]
             report_interval = unpack_from("<I", packet_response, 9)[0]
-            self._report_values[feature_id] = _INITIAL_REPORTS.get(feature_id, (0.0, 0.0, 0.0, 0, 0))
+            self._report_values[feature_id] = _INITIAL_REPORTS.get(feature_id, (0.0, 0.0, 0.0, 0, 0.0))
             self._report_periods_dictionary_us[feature_id] = report_interval
             self._dbg(f"Report enabled: {_REPORTS_DICTIONARY[fid]}: {hex(fid)}")
-            self._dbg(f" Initial tuple={self._report_values}")
             self._dbg(f" Requested Interval: {requested_interval / 1000.0:.1f} ms")
             self._dbg(f" Actual    Interval: {report_interval / 1000.0:.1f} ms\n")
             return 1_000_000. / report_interval
@@ -1650,23 +1673,14 @@ class BNO08X:
         Sometimes a 0xf8 will be set alone and not headed up with a _COMMAND_RESPONSE (0xf1),
         that case is also acceptable
         """
-        self._dbg("********** Check ID **********")
         if getattr(self, "_product_id_received", False):
             return True
-
-        # On channel 2 send PRODUCT_ID_REQUEST (0xf9)
-        data = bytearray(2)
-        data[0] = _REPORT_PRODUCT_ID_REQUEST
-        data[1] = 0
-        self._wake_signal()
-        self._send_packet(SHTP_CHAN_CONTROL, data)
 
         # On channel 2, read/skip packets until _COMMAND_RESPONSE (0xf1)
         start_time = ticks_ms()
         while _elapsed_sec(start_time) < 3.0:
             try:
                 packet = self._read_packet(wait=True)
-                reportid = packet.report_id
                 if packet is None:
                     continue
                 if packet.channel != SHTP_CHAN_CONTROL:
@@ -1674,6 +1688,7 @@ class BNO08X:
                     continue
                 if packet.byte_count - _SHTP_HEADER_LEN == 0:
                     continue
+                reportid = packet.report_id
                 if packet.report_id == _COMMAND_RESPONSE:
                     # Handle packet to process _REPORT_PRODUCT_ID_RESPONSE reports (0xf8)
                     self._handle_packet(packet)
