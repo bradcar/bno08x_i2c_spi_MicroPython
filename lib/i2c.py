@@ -89,6 +89,10 @@ class BNO08X_I2C(BNO08X):
         # I2C can not use cs_pin or wake_pin
         super().__init__(_interface, reset_pin=reset_pin, int_pin=int_pin, cs_pin=None, wake_pin=None, debug=debug)
 
+    def _wake_signal(self):
+        """I2C has no wake signal, when called in the base class this is a noop"""
+        pass
+
     def _wait_for_int(self):
         """
         Waits for int_pin to assert (go low) by monitoring microsecond timestamp set by the Interrupt.
@@ -189,7 +193,3 @@ class BNO08X_I2C(BNO08X):
         # self._dbg(f" Received Packet *************{new_packet}")
 
         return new_packet
-
-    def _wake_signal(self):
-        """I2C has no wake signal, when called in the base class this is a noop"""
-        pass
