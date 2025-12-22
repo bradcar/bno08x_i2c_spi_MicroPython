@@ -121,6 +121,7 @@ _FRS_READ_REQUEST = const(0xF4)
 _FRS_READ_RESPONSE = const(0xF3)
 _COMMAND_REQUEST = const(0xF2)
 _COMMAND_RESPONSE = const(0xF1)
+_COMMAND_EXE_RESPONSE = const(0x01)
 
 # Sensor Commands
 _COMMAND_ADVERTISE = const(0x00)  # Request Advertisement command on Chan 0
@@ -287,6 +288,7 @@ _Q_POINT_9_SCALAR = 2 ** (9 * -1)
 _Q_POINT_8_SCALAR = 2 ** (8 * -1)
 _Q_POINT_4_SCALAR = 2 ** (4 * -1)
 
+
 _REPORT_LENGTHS = {
     # Sensor Reports
     BNO_REPORT_ACCELEROMETER: 10,  # 0x01
@@ -329,12 +331,18 @@ _REPORT_LENGTHS = {
     #     BNO_REPORT_MOTION_REQUEST: 6,  # sent to host periodically? 0x2b
     #     BNO_REPORT_OPTICAL_FLOW: 24,  #  0x2c
     #     BNO_REPORT_DEAD_RECKONING: 60, #  0x2d
+    
     # Command Reports
     _COMMAND_RESPONSE: 16,  # 0xf1
     _REPORT_PRODUCT_ID_RESPONSE: 16,  # 0xf8
     _GET_FEATURE_RESPONSE: 17,  # 0xfc
     _BASE_TIMESTAMP: 5,  # 0xfb
     _TIMESTAMP_REBASE: 5,  #0xfa
+}
+
+# Channel 1 Command Reports
+_COMMAND_REPORT_LENGTHS = {
+    _COMMAND_EXE_RESPONSE: 1,  # 0x01
 }
 
 # these raw reports require their counterpart to be enabled
@@ -521,12 +529,7 @@ class Packet:
         if self.byte_count - _SHTP_HEADER_LEN == 15 and self.channel == SHTP_CHAN_INPUT and self.report_id == 0xfb:
             outstr += f"DBG::\t\t first report: {_REPORTS_DICTIONARY[self.packet_sh2[9]]} ({hex(self.packet_sh2[9])})\n"
 
-        if self.byte_count - _SHTP_HEADER_LEN == 1 and self.channel == SHTP_CHAN_EXE and self.report_id == 0x01:
-            outstr += "DBG::\t\t Command Execution Response: SHTP_COMMAND (0x0)"
-            outstr += "\nDBG::\t\t - Reset Complete Acknowledged, 0xf8 reports to follow\n"
-
-        # Advertisement Response provides sensor information that is printed with debug=True
-        # I2C, SPI, & UART use New Style Advertisement
+        # New Stye Advertisement Response provides sensor information
         if self.byte_count - _SHTP_HEADER_LEN == 51 and self.channel == SHTP_CHAN_COMMAND and self.report_id == _COMMAND_ADVERTISE:
             outstr += "DBG::\t\tNew Style SHTP Advertisement Response (0x00), channel: SHTP_COMMAND (0x0)\n"
             length = len(self.packet_sh2)
@@ -568,40 +571,11 @@ class Packet:
 
             return outstr
 
-        # Advertisement Response provides sensor information that is printed with debug=True
-        # TODO? why at one version did SPI use Old Style Advertisement?
+        # OLD Stye Advertisement Response provides sensor information, removed to reduce code size
         if self.byte_count - _SHTP_HEADER_LEN == 34 and self.channel == SHTP_CHAN_COMMAND and self.report_id == _COMMAND_ADVERTISE:
             outstr += "DBG::\t\tOld Style SHTP Advertisement Response (0x00), channel: SHTP_COMMAND (0x0)\n"
-            p = _SHTP_HEADER_LEN + 4
-            response_id = self.packet_sh2[p]
-            normal_channel = self.packet_sh2[p + 1]
-            wake_channel = self.packet_sh2[p + 2]
-            max_cargo_write = self.packet_sh2[p + 3] | (self.packet_sh2[p + 4] << 8)
-            max_cargo_read = self.packet_sh2[p + 5] | (self.packet_sh2[p + 6] << 8)
-            max_transfer_write = self.packet_sh2[p + 7] | (self.packet_sh2[p + 8] << 8)
-            max_transfer_read = self.packet_sh2[p + 9] | (self.packet_sh2[p + 10] << 8)
-            outstr += f"DBG::\t\t Normal Channel: {normal_channel}\n"
-            outstr += f"DBG::\t\t Wake Channel: {wake_channel}\n"
-            outstr += f"DBG::\t\t Max Cargo Write: {max_cargo_write}\n"
-            outstr += f"DBG::\t\t Max Cargo Read:  {max_cargo_read}\n"
-            outstr += f"DBG::\t\t Max Transfer Write: {max_transfer_write}\n"
-            outstr += f"DBG::\t\t Max Transfer Read: {max_transfer_read}\n"
-            idx = p + 11  # strings, null terminated
-            end = self.byte_count
-
-            def read_cstring(buf, start):
-                i = start
-                while i < end and buf[i] != 0:
-                    i += 1
-                s = buf[start:i].decode("ascii", "ignore")
-                return s, i + 1
-
-            app_name, idx = read_cstring(self.packet_sh2, idx)
-            chan_name, idx = read_cstring(self.packet_sh2, idx)
-            ctl_name, idx = read_cstring(self.packet_sh2, idx)
-            outstr += f"DBG::\t\t App: {app_name}\n"
-            outstr += f"DBG::\t\t Channel: {chan_name}\n"
-            outstr += f"DBG::\t\t Controller: {ctl_name}\n"
+            return outstr
+        
         return outstr
 
     @property
@@ -891,7 +865,7 @@ class BNO08X:
             a. processes sensor reports directly
                 i. sensor results & metadata (accuracy & timestamp) put into _report_values[report_id]
                 ii. update count in _unread_report_count[report_id] += 1
-            b. _handle_control_report - timestamps and vatious command responses/reports
+            b. _process_control_report - timestamps and vatious command responses/reports
 
         Note: timestamp is ms(millisec) since 1st BNO08x interrupt, which is close to sensor power up.
     """
@@ -999,36 +973,36 @@ class BNO08X:
         self._send_packet(SHTP_CHAN_CONTROL, data)
 
         # Process packets until the ID appears
-        #         start = ticks_ms()
-        #         while not self._product_id_received and ticks_diff(ticks_ms(), start) < 1000:
-        #             self._parse_packets()
-        #
-        #         if self._product_id_received and not self._reset_mismatch:
-        #             self._dbg(f"*** {reset_type} reset successful, acknowledged with Product ID 0xF8 response")
-        #             self._tx_sequence_number = [0, 0, 0, 0, 0, 0]
-        #             self._rx_sequence_number = [0, 0, 0, 0, 0, 0]
-        #             return
-        #
-        #         if self._reset_mismatch:
-        #             raise RuntimeError("{reset_type} reset cause mismatch; check reset_pin wiring")
-        #
-        #         raise RuntimeError("{reset_type} reset not acknowledged, check BNO086 wiring")
+        start = ticks_ms()
+        while not self._product_id_received and ticks_diff(ticks_ms(), start) < 1000:
+            self._parse_packets()
 
-        #################################
-
-        if self._check_id() and not self._reset_mismatch:
-            self._dbg(f"*** {reset_type} reset successful, acknowledged with Product ID 0xF8 response")
-            sleep_ms(100)  # allow SHTP time to settle
+        if self._product_id_received and not self._reset_mismatch:
+            self._dbg(f"*** {reset_type} reset success, acknowledged with first Product ID 0xF8 response\n")
             self._tx_sequence_number = [0, 0, 0, 0, 0, 0]
             self._rx_sequence_number = [0, 0, 0, 0, 0, 0]
             return
 
         if self._reset_mismatch:
-            raise RuntimeError("Reset cause mismatch; check reset_pin wiring")
+            raise RuntimeError("{reset_type} reset cause mismatch; check reset_pin wiring")
 
-        # sleep_ms(600)  # is this excessive?
+        raise RuntimeError("{reset_type} reset not acknowledged, check BNO086 wiring")
 
-        raise RuntimeError(f"Failed to get valid Product ID Response (0xf8) with {reset_type} reset")
+        #################################
+
+#         if self._check_id() and not self._reset_mismatch:
+#             self._dbg(f"*** {reset_type} reset successful, acknowledged with Product ID 0xF8 response")
+#             sleep_ms(100)  # allow SHTP time to settle
+#             self._tx_sequence_number = [0, 0, 0, 0, 0, 0]
+#             self._rx_sequence_number = [0, 0, 0, 0, 0, 0]
+#             return
+# 
+#         if self._reset_mismatch:
+#             raise RuntimeError("Reset cause mismatch; check reset_pin wiring")
+# 
+#         # sleep_ms(600)  # is this excessive?
+# 
+#         raise RuntimeError(f"Failed to get valid Product ID Response (0xf8) with {reset_type} reset")
 
     ############ USER VISIBLE REPORT FUNCTIONS ###########################
 
@@ -1340,33 +1314,39 @@ class BNO08X:
                 break
 
             processed_count += 1
+            channel = packet.channel
             packet_sh2 = packet.packet_sh2
             data_length = len(packet_sh2)
 
             if data_length > 0 and packet_sh2[0] == 0x00:
-                processed_count += 1
                 continue
 
             # --- START INLINED _handle_packet ---
             next_byte_index = _SHTP_HEADER_LEN  # Payload after the 4-byte SHTP header
             while next_byte_index < data_length:
                 report_id = packet_sh2[next_byte_index]
-                required_bytes = report_length_map.get(report_id, 0)
+                if channel in [2, 3, 5]:
+                    required_bytes = report_length_map.get(report_id, 0)
+                    
+                    if required_bytes == 0:
+                        self._dbg(f"UNSUPPORTED Report ID {hex(report_id)} - SKIPPING ONE BYTE")
+                        next_byte_index += 1
+                        continue
 
-                if required_bytes == 0:
-                    self._dbg(f"UNSUPPORTED Report ID {hex(report_id)} - SKIPPING ONE BYTE")
-                    next_byte_index += 1
-                    continue
+                    unprocessed_byte_count = data_length - next_byte_index
+                    if unprocessed_byte_count < required_bytes:
+                        self._dbg(f"UNSUPPORTED truncated Packet ERROR: {unprocessed_byte_count} bytes")
+                        break
 
-                unprocessed_byte_count = data_length - next_byte_index
-                if unprocessed_byte_count < required_bytes:
-                    self._dbg(f"UNSUPPORTED truncated Packet ERROR: {unprocessed_byte_count} bytes")
+                    report_view = packet_sh2[next_byte_index: next_byte_index + required_bytes]
+                    self._process_report(report_id, report_view)
+                    next_byte_index += required_bytes
+                    
+                if channel in (0,1): # Channel 0 & 1 reports are all single reports
+                    report_view = packet_sh2
+                    self._process_control_report(report_id, report_view)
                     break
 
-                report_view = packet_sh2[next_byte_index: next_byte_index + required_bytes]
-                self._process_report(report_id, report_view)
-
-                next_byte_index += required_bytes
             # --- END INLINED _handle_packet  ---
 
         return processed_count
@@ -1374,7 +1354,7 @@ class BNO08X:
     def _handle_packet(self, packet):
         """
         Splits a packet into multiple reports and process them in FIFO order.
-        NOTE: **** this code is also inlined in _parse_packets for efficiency ****
+        NOTE: **** this code has inlined in _parse_packets for efficiency ****
         """
         data_length = len(packet.packet_sh2)
         next_byte_index = _SHTP_HEADER_LEN  # offset to skip over SHTP header
@@ -1396,6 +1376,7 @@ class BNO08X:
 
             report_view = packet.packet_sh2[next_byte_index: next_byte_index + required_bytes]
             self._process_report(report_id, report_view)
+
             report_count += 1
             next_byte_index += required_bytes
 
@@ -1425,90 +1406,14 @@ class BNO08X:
             f"Timed out waiting for packet on channel {channel} with ReportID {report_id} after {timeout}s"
         )
 
-    def _handle_control_report(self, report_id: int, report_bytes: bytearray) -> None:
-        """
-        Handle control reports. Handle time-critical Timestamp methods first
-        :param report_id: report ID
-        :param report_bytes: portion of packet for report
-        :return:
-        """
-        # Base Timestamp (0xfb)
-        if report_id == _BASE_TIMESTAMP:
-            self._last_base_timestamp_us = unpack_from("<I", report_bytes, 1)[0] * 100
-            return
-
-        # Timestamp Rebase (0xfa), this sent when _BASE_TIMESTAMP wraps
-        if report_id == _TIMESTAMP_REBASE:
-            self._last_base_timestamp_us = unpack_from("<I", report_bytes, 1)[0] * 100
-            return
-
-        # Feature response (0xfc) - This report issued when feature is enabled or updated
-        if report_id == _GET_FEATURE_RESPONSE:
-            _report_id, feature_report_id = unpack_from("<BB", report_bytes)
-            report_interval = unpack_from("<I", report_bytes, 5)[0]
-            self._report_values[feature_report_id] = _INITIAL_REPORTS.get(feature_report_id, (0.0, 0.0, 0.0, 0, 0.0))
-            self._unread_report_count[feature_report_id] = 0
-            self._report_periods_dictionary_us[feature_report_id] = report_interval
-            self._dbg(f"Report update: {_REPORTS_DICTIONARY[feature_report_id]}: {hex(feature_report_id)}")
-            self._dbg(f" Initialize tuple={self._report_values}")
-            self._dbg(f" Report Interval: {report_interval / 1000.0:.1f} ms\n")
-            return
-
-        # Command Response (0xf1) - ME and DCD, can also head 0xf8 responses for i2c and spi
-        if report_id == _COMMAND_RESPONSE:
-            self._handle_command_response(report_bytes)
-            return
-
-        # Product ID Response (0xf8)
-        if report_id == _REPORT_PRODUCT_ID_RESPONSE:
-            reset_cause = report_bytes[1]
-            sw_major = report_bytes[2]
-            sw_minor = report_bytes[3]
-            sw_part_number = unpack_from("<I", report_bytes, 4)[0]
-            sw_build_number = unpack_from("<I", report_bytes, 8)[0]
-            sw_patch = unpack_from("<H", report_bytes, 12)[0]
-            self._dbg("Product ID Response (0xf8):")
-            self._dbg(f"*** Last Reset Cause: {reset_cause} = {_RESET_CAUSE_STRING[reset_cause]}")
-            self._dbg(f"*** Part Number: {sw_part_number}")
-            self._dbg(f"*** Software Version: {sw_major}.{sw_minor}.{sw_patch}")
-            self._dbg(f"\tBuild: {sw_build_number}\n")
-
-            # only first Product ID Response report has reset cause, HW reset_cause=4
-            if not self._product_id_received:
-                if reset_cause != 4:
-                    self._reset_mismatch = True
-                    self._dbg(f"Expected 4 for Reset Cause with reset_pin, got {reset_cause}")
-            self._product_id_received = True
-            return
-
-    def _handle_command_response(self, report_bytes: bytearray) -> None:
-        report_body = unpack_from("<BBBBB", report_bytes)
-        response = unpack_from("<BBBBBBBBBBB", report_bytes, 5)
-        (_report_id, _seq_number, command, _command_seq_number, _response_seq_number,) = report_body
-        self._dbg(f"***Command response 0xf1")
-
-        cal_status, accel_en, gyro_en, mag_en, planar_en, table_en, *_reserved = response
-
-        if command == _ME_CALIBRATE_COMMAND and cal_status == 0:
-            self._me_calibration_started_at = ticks_ms()
-            self._calibration_started = True
-            self._dbg(f"Ready to start calibration at {ticks_ms()=}")
-
-        elif command == _SAVE_DCD_COMMAND:
-            self._dbg(f"DCD Save calibration sucess. Status is {cal_status}")
-            if cal_status == _COMMAND_STATUS_SUCCESS:
-                self._dcd_saved_at = ticks_ms()
-            else:
-                raise RuntimeError(f"Unable to save calibration data, status={cal_status}")
-
     def _process_report(self, report_id: int, report_bytes: bytearray) -> None:
         """
-        Process reports both sensor and control reports
+        Process reports both sensor reports (channel 3) and control reports (channel 2)
         Extracted accuracy and delay from sensor report (100usec ticks)
         Multiple reports are processed in the order they appear in the packet buffer.
         Last sensor report's value over-write previous in this packet, ex: self._report_values[report_id],
         """
-        # handle typical sensor reports first
+        # process typical sensor reports first
         if 0x01 <= report_id <= 0x09:
             # uctypes-based sensor reports, Parses 3-tuple, 4-tuple, and 5-tuple
             scalar, count = _SENSOR_SCALING[report_id]
@@ -1544,9 +1449,9 @@ class BNO08X:
             self._unread_report_count[report_id] += 1
             return
 
-        #  **** Handle all control reports, here because some are time-critical
+        #  **** Process all control reports, here because some are time-critical
         if report_id >= 0xF0:
-            self._handle_control_report(report_id, report_bytes)
+            self._process_control_report(report_id, report_bytes)
             return
 
         if report_id == BNO_REPORT_STEP_COUNTER:
@@ -1597,6 +1502,107 @@ class BNO08X:
         self._dbg(f"report: {report_bytes}")
         raise NotImplementedError(
             f"Un-implemented Report ({hex(report_id)=}) not supported yet.\n report: {report_bytes}")
+    
+    def _process_control_report(self, report_id: int, report_bytes: bytearray) -> None:
+        """
+        Process control reports. These are only on Channel 2
+        process time-critical Timestamp methods first
+        :param report_id: report ID
+        :param report_bytes: portion of packet for report
+        :return:
+        """
+        # Base Timestamp (0xfb)
+        if report_id == _BASE_TIMESTAMP:
+            self._last_base_timestamp_us = unpack_from("<I", report_bytes, 1)[0] * 100
+            return
+
+        # Timestamp Rebase (0xfa), this sent when _BASE_TIMESTAMP wraps
+        if report_id == _TIMESTAMP_REBASE:
+            self._last_base_timestamp_us = unpack_from("<I", report_bytes, 1)[0] * 100
+            return
+
+        # Feature response (0xfc) - This report issued when feature is enabled or updated
+        if report_id == _GET_FEATURE_RESPONSE:
+            _report_id, feature_report_id = unpack_from("<BB", report_bytes)
+            report_interval = unpack_from("<I", report_bytes, 5)[0]
+            self._report_values[feature_report_id] = _INITIAL_REPORTS.get(feature_report_id, (0.0, 0.0, 0.0, 0, 0.0))
+            self._unread_report_count[feature_report_id] = 0
+            self._report_periods_dictionary_us[feature_report_id] = report_interval
+            self._dbg(f"Enabled Report: {_REPORTS_DICTIONARY[feature_report_id]}: {hex(feature_report_id)}")
+            self._dbg(f" Report Interval: {report_interval / 1000.0:.1f} ms")
+            self._dbg(f" All Enabled tuples = {self._report_values}\n")
+            return
+
+        # Command Response (0xf1) - confirms re-set(i2c & spi), ME or DCD
+        if report_id == _COMMAND_RESPONSE:
+            self._dbg(f"***Command response (0xf1)")       
+            command = report_bytes[2]
+            # if command < 128:  # command & 0x80 == 0, ** removed to cut code size, info not that helpful
+            #    self._dbg(" - Response due to Command Request\n")
+            if command & 0x7f == 4:
+                self._dbg(" - Command to Re-Initialzed BNO08x received\n")                
+            return
+
+        # Product ID Response (0xf8)
+        if report_id == _REPORT_PRODUCT_ID_RESPONSE:
+            reset_cause = report_bytes[1]
+            sw_major = report_bytes[2]
+            sw_minor = report_bytes[3]
+            sw_part_number = unpack_from("<I", report_bytes, 4)[0]
+            sw_build_number = unpack_from("<I", report_bytes, 8)[0]
+            sw_patch = unpack_from("<H", report_bytes, 12)[0]
+            self._dbg("Product ID Response (0xf8):")
+            self._dbg(f"*** Last Reset Cause: {reset_cause} = {_RESET_CAUSE_STRING[reset_cause]}")
+            self._dbg(f"*** Part Number: {sw_part_number}")
+            self._dbg(f"*** Software Version: {sw_major}.{sw_minor}.{sw_patch}")
+            self._dbg(f"\tBuild: {sw_build_number}\n")
+
+            # only first Product ID Response report has reset cause, HW reset_cause=4
+            if not self._product_id_received:
+                if reset_cause != 4:
+                    self._reset_mismatch = True
+                    self._dbg(f"Expected 4 for Reset Cause with reset_pin, got {reset_cause}")
+            self._product_id_received = True
+            return
+        
+        # 0x00 first wake advertisement
+        if report_id == 0x00:
+            self._dbg("*** First wake response on Channel 0x00")
+            self._dbg("Data:")
+            length = len(report_bytes) 
+            outstr = f"Data Len: {length - _SHTP_HEADER_LEN}"
+            for idx, packet_byte in enumerate(report_bytes[4:length]):
+                packet_index = idx + _SHTP_HEADER_LEN
+                if (packet_index % 4) == 0:
+                    outstr += f"\nDBG::\t\t[0x{packet_index:02X}] "
+                outstr += f"0x{packet_byte:02X} "
+            outstr += "\n\t\t*******************************\n"
+            self._dbg(f"{outstr}")
+            return
+        
+        if report_id == 0x01:
+            self._dbg("Command Execution Response: SHTP_COMMAND (0x0)")
+            self._dbg(" - Reset Complete Acknowledged, 0xf8 reports to follow\n")
+            return   
+
+    def _handle_command_response(self, report_bytes: bytearray) -> None:
+        report_body = unpack_from("<BBBBB", report_bytes)
+        response = unpack_from("<BBBBBBBBBBB", report_bytes, 5)
+        (_report_id, _seq_number, command, _command_seq_number, _response_seq_number,) = report_body
+
+        cal_status, accel_en, gyro_en, mag_en, planar_en, table_en, *_reserved = response
+
+        if command == _ME_CALIBRATE_COMMAND and cal_status == 0:
+            self._me_calibration_started_at = ticks_ms()
+            self._calibration_started = True
+            self._dbg(f"Ready to start calibration at {ticks_ms()=}")
+
+        elif command == _SAVE_DCD_COMMAND:
+            self._dbg(f"DCD Save calibration sucess. Status is {cal_status}")
+            if cal_status == _COMMAND_STATUS_SUCCESS:
+                self._dcd_saved_at = ticks_ms()
+            else:
+                raise RuntimeError(f"Unable to save calibration data, status={cal_status}")
 
     # Enable given feature/sensor report on BNO08x (See SH2 6.5.4)
     def enable_feature(self, feature_id, freq=None):
@@ -1608,9 +1614,9 @@ class BNO08X:
         :returns frequency (float) actual frequency the sensor will attempt to use
         """
         self._dbg(f"Send SET_FEATURE_COMMAND (0xfd) to enable FEATURE ID: {hex(feature_id)}")
-        set_feature_report = bytearray(17)
-        set_feature_report[0] = _SET_FEATURE_COMMAND
-        set_feature_report[1] = feature_id
+        feature_enable_request = bytearray(17)
+        feature_enable_request[0] = _SET_FEATURE_COMMAND
+        feature_enable_request[1] = feature_id
 
         if freq is None:
             freq = DEFAULT_REPORT_FREQ[feature_id]
@@ -1620,10 +1626,10 @@ class BNO08X:
         else:
             requested_interval = 0  # effectively turns of reports? but feature still enabled
 
-        pack_into("<I", set_feature_report, 5, requested_interval)
+        pack_into("<I", feature_enable_request, 5, requested_interval)
 
         if feature_id == BNO_REPORT_ACTIVITY_CLASSIFIER:
-            pack_into("<I", set_feature_report, 13, _ENABLED_ACTIVITIES)
+            pack_into("<I", feature_enable_request, 13, _ENABLED_ACTIVITIES)
 
         # raw sensor rate cannot be higher than the underlying sensor rate
         feature_dependency = _RAW_REPORTS.get(feature_id, None)
@@ -1632,23 +1638,16 @@ class BNO08X:
             self._dbg(f"{_REPORTS_DICTIONARY[feature_dependency]} {hex(feature_dependency)}")
             self.enable_feature(feature_dependency, freq)
 
-        # send request _SET_FEATURE_COMMAND (0xfb) with requested period
+        self._dbg(f" Requested Interval: {requested_interval / 1000.0:.1f} ms")
         self._wake_signal()
-        self._send_packet(SHTP_CHAN_CONTROL, set_feature_report)
+        self._send_packet(SHTP_CHAN_CONTROL, feature_enable_request)
 
         # wait for response, ignore packets until _GET_FEATURE_RESPONSE (0xfc)
         try:
             report_bytes = self._wait_for_packet(SHTP_CHAN_CONTROL, _GET_FEATURE_RESPONSE,
                                                  timeout=_FEATURE_ENABLE_TIMEOUT)
-            packet_response = report_bytes.packet_sh2
-            fid = packet_response[5]
-            report_interval = unpack_from("<I", packet_response, 9)[0]
-            self._report_values[feature_id] = _INITIAL_REPORTS.get(feature_id, (0.0, 0.0, 0.0, 0, 0.0))
-            self._report_periods_dictionary_us[feature_id] = report_interval
-            self._dbg(f"Report enabled: {_REPORTS_DICTIONARY[fid]}: {hex(fid)}")
-            self._dbg(f" Requested Interval: {requested_interval / 1000.0:.1f} ms")
-            self._dbg(f" Actual    Interval: {report_interval / 1000.0:.1f} ms\n")
-            return 1_000_000. / report_interval
+
+            return 1_000_000. / self._report_periods_dictionary_us[feature_id]
 
         except RuntimeError:
             raise RuntimeError(f"BNO08X: enable_feature: not able to enable feature: {hex(feature_id)}")
@@ -1663,48 +1662,6 @@ class BNO08X:
         for feature_id in self._report_periods_dictionary_us.keys():
             period_ms = self._report_periods_dictionary_us[feature_id] / 1000.0
             print(f"\t{_REPORTS_DICTIONARY[feature_id]}\t{period_ms:.1f} ms, {1_000 / period_ms:.1f} Hz")
-
-    def _check_id(self):
-        """
-        Send Product ID request then process packets until _COMMAND_RESPONSE (0xf1) received.
-        Then handle packets, the first 0xf8 indicates reset success and last reset cause.
-        Total of 4 0xf8 is normal (last 3 0xf8 will have reset causes = 0).
-        
-        Sometimes a 0xf8 will be set alone and not headed up with a _COMMAND_RESPONSE (0xf1),
-        that case is also acceptable
-        """
-        if getattr(self, "_product_id_received", False):
-            return True
-
-        # On channel 2, read/skip packets until _COMMAND_RESPONSE (0xf1)
-        start_time = ticks_ms()
-        while _elapsed_sec(start_time) < 3.0:
-            try:
-                packet = self._read_packet(wait=True)
-                if packet is None:
-                    continue
-                if packet.channel != SHTP_CHAN_CONTROL:
-                    self._dbg("_check_id skipping above packet\n")
-                    continue
-                if packet.byte_count - _SHTP_HEADER_LEN == 0:
-                    continue
-                reportid = packet.report_id
-                if packet.report_id == _COMMAND_RESPONSE:
-                    # Handle packet to process _REPORT_PRODUCT_ID_RESPONSE reports (0xf8)
-                    self._handle_packet(packet)
-                    break
-                if packet.report_id == _REPORT_PRODUCT_ID_RESPONSE:
-                    # if report is _REPORT_PRODUCT_ID_RESPONSE reports (0xf8)
-                    self._handle_packet(packet)
-                    return True
-            except (RuntimeError, PacketError):
-                continue
-
-        # check if _REPORT_PRODUCT_ID_RESPONSE (0xf8) received
-        if getattr(self, "_product_id_received", False):
-            return True
-
-        raise RuntimeError(f"Timeout waiting for valid BNO Product ID response, check {self._interface} interface")
 
     def _dbg(self, *args, **kwargs) -> None:
         if self._debug:
@@ -1722,7 +1679,7 @@ class BNO08X:
         sleep_us(10)  # sleep_us(1), data sheet say only 10ns required,
         self._reset_pin.value(1)
         sleep_ms(500)  # orig was 10ms, datasheet implies 94 ms required
-        self._dbg("*** Hard Reset End, awaiting acknowledgement (0xf8)")
+        self._dbg("*** Hard Reset End, awaiting acknowledgement (0xf8)\n")
 
     def _soft_reset(self) -> None:
         """Send the 'reset' command packet on Executable Channel (1), Section 1.3.1 SHTP"""
