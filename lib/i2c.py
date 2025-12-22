@@ -8,7 +8,7 @@
 I2C Class that requires BNO08X base Class
 """
 
-from struct import pack_into
+from struct import pack_into, pack
 
 import uctypes
 from machine import Pin
@@ -118,16 +118,13 @@ class BNO08X_I2C(BNO08X):
         seq = self._tx_sequence_number[channel]
         data_length = len(data)
         write_length = data_length + 4
-
-        pack_into("<HBB", self._data_buffer, 0, write_length, channel, seq)
-        self._data_buffer[4:4 + data_length] = data
+        send_packet = bytearray(pack("<HBB", write_length, channel, seq) + data)
 
         if self._debug:
-            packet = Packet(self._data_buffer)
+            packet = Packet(send_packet)
             self._dbg(f"  Sending Packet *************{packet}")
 
-        mv = memoryview(self._data_buffer)
-        self._i2c.writeto(self._bno_i2c_addr, mv[:write_length])
+        self._i2c.writeto(self._bno_i2c_addr, send_packet)
 
         self._tx_sequence_number[channel] = (seq + 1) & 0xFF
         return self._tx_sequence_number[channel]
