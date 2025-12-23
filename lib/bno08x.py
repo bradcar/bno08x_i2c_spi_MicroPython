@@ -534,34 +534,6 @@ class Packet:
         # New Stye Advertisement Response provides sensor information
         if self.byte_count - _SHTP_HEADER_LEN >= 51 and self.channel == SHTP_CHAN_COMMAND and self.report_id == _COMMAND_ADVERTISE:
             outstr += "DBG::\t\tNew Style SHTP Advertisement Response (0x00), channel: SHTP_COMMAND (0x0)\n"
-            length = len(self.packet_sh2)
-            index = _SHTP_HEADER_LEN + 1
-
-            while index < length:
-                tag, tag_len = self.packet_sh2[index:index + 2]
-                value_index = index + 2
-                next_index = value_index + tag_len
-                value = self.packet_sh2[value_index:next_index]
-                index = next_index
-
-                if tag not in _tag_dictionary:
-                    outstr += f"DBG::\t\t Unknown tag = {tag}\n"
-                    continue
-
-                name, fmt, sub_hdr, clamp = _tag_dictionary[tag]
-                if fmt == 'S':
-                    s = "" if tag == 0 else f": {value.decode('ascii')}"
-                    outstr += f"DBG::\t\t {name}{s}\n"
-                else:
-                    v = unpack_from(fmt, value)[0]
-                    if sub_hdr:
-                        v -= 4
-                        s = ", (payload only, header will add 4)"
-                    else:
-                        s = ""
-                    if clamp: v = min(v, 1024)
-                    outstr += f"DBG::\t\t {name}: {v}{s}\n"
-
             return outstr
 
         # OLD Stye Advertisement Response of sensor information, parser removed to reduce code size
@@ -831,8 +803,7 @@ class RawSensorFeature:
                 yield val[i]
         except KeyError:
             raise RuntimeError(
-                f"Feature not enabled, use bno.{_REPORTS_DICTIONARY[self.feature_id]}.enable()"
-            ) from None
+                f"Feature not enabled, use bno.{_REPORTS_DICTIONARY[self.feature_id]}.enable()") from None
 
 
 class BNO08X:
@@ -966,9 +937,9 @@ class BNO08X:
             return
 
         if self._reset_mismatch:
-            raise RuntimeError("{reset_type} reset cause mismatch; check reset_pin wiring")
+            raise RuntimeError(f"{reset_type} reset cause mismatch; check reset_pin wiring")
 
-        raise RuntimeError("{reset_type} reset not acknowledged, check BNO086 wiring")
+        raise RuntimeError(f"{reset_type} reset not acknowledged, check BNO086 wiring")
 
     ############ USER VISIBLE REPORT FUNCTIONS ###########################
 
@@ -1294,7 +1265,7 @@ class BNO08X:
 
                     unprocessed_byte_count = data_length - next_byte_index
                     if unprocessed_byte_count < required_bytes:
-                        self._dbg(f"UNSUPPORTED truncated Packet ERROR: {unprocessed_byte_count} bytes")
+                        self._dbg(f"UNSUPPORTED truncated packet ERROR: {unprocessed_byte_count} bytes")
                         break
 
                     report_view = packet_sh2[next_byte_index: next_byte_index + required_bytes]
