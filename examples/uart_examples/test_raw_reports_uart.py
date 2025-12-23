@@ -21,6 +21,7 @@ int_pin = Pin(14, Pin.IN, Pin.PULL_UP)  # Interrupt, BNO (RST) signals when read
 reset_pin = Pin(15, Pin.OUT, value=1)  # Reset, tells BNO (INT) to reset
 
 uart = UART(1, baudrate=3_000_000, tx=Pin(8), rx=Pin(9))
+
 bno = BNO08X_UART(uart, reset_pin=reset_pin, int_pin=int_pin)
 
 print(uart)  # baudrate 3000000 required

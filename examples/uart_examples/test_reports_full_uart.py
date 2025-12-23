@@ -1,5 +1,5 @@
 # test_reports_full_uart.py
-#
+  #
 # BNO08x MicroPython UART Test
 #
 # UART interface: Test common sensor reports:
@@ -24,6 +24,7 @@ int_pin = Pin(14, Pin.IN, Pin.PULL_UP)  # BNO sensor (INT)
 reset_pin = Pin(15, Pin.OUT, value=1)  # BNO sensor (RST)
 
 uart = UART(1, baudrate=3000000, tx=Pin(8), rx=Pin(9))
+
 bno = BNO08X_UART(uart, reset_pin=reset_pin, int_pin=int_pin)
 
 print(uart)  # baudrate 3000000 required
