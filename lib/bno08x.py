@@ -123,9 +123,19 @@ _COMMAND_REQUEST = const(0xF2)
 _COMMAND_RESPONSE = const(0xF1)
 _COMMAND_EXE_RESPONSE = const(0x01)
 
-# Sensor Commands
+# Sensor Commands & Command reports
 _COMMAND_ADVERTISE = const(0x00)  # Request Advertisement command on Chan 0
+_ADVERTISE_REPORT = const(0x00)  # Report ID Advertisement command on Chan 0
+_COMMAND_EXE_REPORT = const(0x01)  # Report to Acknowledge Command execute
 _COMMAND_RESET = const(0x01)  # Soft Reset command on Chan 0
+
+# Advertisement Tag Processors: {tag_id: (name, format, subtract_header_4, clamp_max_1024)}
+_tag_dictionary = {0: ("TAG_NULL", 'S', 0, 0), 1: ("TAG_GUID", '<I', 0, 0),
+                   2: ("Max Cargo Write", '<H', 1, 0), 3: ("Max Cargo Read", '<H', 1, 0),
+                   4: ("TAG_MAX_TRANSFER_WRITE", '<H', 0, 1), 5: ("TAG_MAX_TRANSFER_READ", '<H', 0, 1),
+                   6: ("TAG_NORMAL_CHANNEL", '<B', 0, 0), 7: ("TAG_WAKE_CHANNEL", '<B', 0, 0),
+                   8: ("TAG_APP_NAME", 'S', 0, 0), 9: ("TAG_CHANNEL_NAME", 'S', 0, 0),
+                   10: ("TAG_ADV_COUNT", '<B', 0, 0), 0x80: ("Version", 'S', 0, 0)}
 
 # Status Constants
 _COMMAND_STATUS_SUCCESS = 0
@@ -458,11 +468,6 @@ REPORT_ACCURACY_STATUS = [
 ]
 
 
-class PacketError(Exception):
-    """Raised when the packet could not be parsed"""
-    pass
-
-
 # Elapsed seconds, pass in tick_ms
 def _elapsed_sec(ticks_start):
     """ Elapsed time between now - ticks_start. Returns float in seconds """
@@ -521,8 +526,6 @@ class Packet:
                 outstr += f"\nDBG::\t\t[0x{packet_index:02X}] "
             outstr += f"0x{packet_byte:02X} "
         outstr += "\n\t\t*******************************\n"
-        # ascii = ''.join(chr(b) if 32 <= b <= 126 else f" x{b:02X}" for b in self.packet_sh2[:length])
-        # outstr += f"\nDBG::\t\t ascii: {ascii}\n"
 
         # preliminary decoding of packets
         if self.byte_count - _SHTP_HEADER_LEN == 15 and self.channel == SHTP_CHAN_INPUT and self.report_id == 0xfb:
@@ -534,15 +537,6 @@ class Packet:
             length = len(self.packet_sh2)
             index = _SHTP_HEADER_LEN + 1
 
-            # Tag Processors: {tag_id: (name, format, subtract_header_4, clamp_max_1024)}
-            tag_dictionary = {0: ("TAG_NULL", 'S', 0, 0), 1: ("TAG_GUID", '<I', 0, 0),
-                              2: ("Max Cargo Write", '<H', 1, 0),
-                              3: ("Max Cargo Read", '<H', 1, 0), 4: ("TAG_MAX_TRANSFER_WRITE", '<H', 0, 1),
-                              5: ("TAG_MAX_TRANSFER_READ", '<H', 0, 1), 6: ("TAG_NORMAL_CHANNEL", '<B', 0, 0),
-                              7: ("TAG_WAKE_CHANNEL", '<B', 0, 0), 8: ("TAG_APP_NAME", 'S', 0, 0),
-                              9: ("TAG_CHANNEL_NAME", 'S', 0, 0),
-                              10: ("TAG_ADV_COUNT", '<B', 0, 0), 0x80: ("Version", 'S', 0, 0)}
-
             while index < length:
                 tag, tag_len = self.packet_sh2[index:index + 2]
                 value_index = index + 2
@@ -550,11 +544,11 @@ class Packet:
                 value = self.packet_sh2[value_index:next_index]
                 index = next_index
 
-                if tag not in tag_dictionary:
+                if tag not in _tag_dictionary:
                     outstr += f"DBG::\t\t Unknown tag = {tag}\n"
                     continue
 
-                name, fmt, sub_hdr, clamp = tag_dictionary[tag]
+                name, fmt, sub_hdr, clamp = _tag_dictionary[tag]
                 if fmt == 'S':
                     s = "" if tag == 0 else f": {value.decode('ascii')}"
                     outstr += f"DBG::\t\t {name}{s}\n"
@@ -570,7 +564,7 @@ class Packet:
 
             return outstr
 
-        # OLD Stye Advertisement Response provides sensor information, removed to reduce code size
+        # OLD Stye Advertisement Response of sensor information, parser removed to reduce code size
         if self.byte_count - _SHTP_HEADER_LEN == 34 and self.channel == SHTP_CHAN_COMMAND and self.report_id == _COMMAND_ADVERTISE:
             outstr += "DBG::\t\tOld Style SHTP Advertisement Response (0x00), channel: SHTP_COMMAND (0x0)\n"
             return outstr
@@ -579,22 +573,18 @@ class Packet:
 
     @property
     def byte_count(self) -> int:
-        """The packet channel"""
         return self.header.packet_byte_count
 
     @property
     def channel(self) -> int:
-        """The packet channel"""
         return self.header.channel_number
 
     @property
     def seq(self) -> int:
-        """The packet seq number"""
         return self.header.sequence_number
 
     @property
     def report_id(self) -> int:
-        """The Packet's first Report ID"""
         return self.header.report_id_number
 
     @classmethod
@@ -613,7 +603,7 @@ class Packet:
 
     @classmethod
     def is_error(cls, header: PacketHeader) -> bool:
-        """Returns True if the header is an error condition"""
+        """ header is an error condition"""
         if header.channel_number > 5:
             return True
         if header.packet_byte_count == 0xFFFF and header.sequence_number == 0xFF:
@@ -630,7 +620,6 @@ class SensorFeature1:
         self.feature_id = feature_id
 
     def enable(self, hertz=None):
-        """Method to enable the feature with a given report rate (hertz)."""
         return self._bno.enable_feature(self.feature_id, hertz)
 
     @property
@@ -664,7 +653,6 @@ class SensorFeature2:
         self.feature_id = feature_id
 
     def enable(self, hertz=None):
-        """Method to enable the feature with a given report rate (hertz)."""
         return self._bno.enable_feature(self.feature_id, hertz)
 
     @property
@@ -674,9 +662,9 @@ class SensorFeature2:
             return True
         return False
 
-    # This method allows the object to be implicitly converted to the (v1, v2) tuple.
+    # convert object to (v1, v2) tuple
     def __iter__(self):
-        """Allows direct unpacking: x, y = bno.activity_classifier"""
+        """Direct unpacking, ex:  x, y = bno.activity_classifier"""
         try:
             x, y = self._bno._report_values[self.feature_id]
             return iter((x, y))
@@ -694,7 +682,6 @@ class SensorFeature3:
         self.feature_id = feature_id
 
     def enable(self, hertz=None):
-        """Method to enable the feature with a given report rate (hertz)."""
         return self._bno.enable_feature(self.feature_id, hertz)
 
     @property
@@ -704,7 +691,6 @@ class SensorFeature3:
             return True
         return False
 
-    # --- Properties to retrieve the latest data from the BNO instance ---
     @property
     def meta(self):
         """Returns (accuracy, timestamp_ms)."""
@@ -725,9 +711,8 @@ class SensorFeature3:
             raise RuntimeError(
                 f"Feature not enabled, use bno.{_REPORTS_DICTIONARY[self.feature_id]}.enable()") from None
 
-    # This method allows the object to be implicitly converted to the (v1, v2, v3) tuple.
     def __iter__(self):
-        """Allows direct unpacking: x, y, z = bno.acceleration"""
+        """Direct unpacking, ex: x, y, z = bno.acceleration"""
         try:
             x, y, z, _, _ = self._bno._report_values[self.feature_id]
             return iter((x, y, z))
@@ -750,7 +735,6 @@ class SensorFeature4:
         self.feature_id = feature_id
 
     def enable(self, hertz=None):
-        """Method to enable the feature with a given report rate (hertz)."""
         return self._bno.enable_feature(self.feature_id, hertz)
 
     @property
@@ -760,10 +744,8 @@ class SensorFeature4:
             return True
         return False
 
-    # --- Properties to retrieve the latest data from the BNO instance ---
     @property
     def meta(self):
-        """Returns (accuracy, timestamp_ms)."""
         try:
             _, _, _, _, acc, ts = self._bno._report_values[self.feature_id]
             return acc, ts
@@ -803,9 +785,8 @@ class SensorFeature4:
             raise RuntimeError(
                 f"Feature not enabled, use bno.{_REPORTS_DICTIONARY[self.feature_id]}.enable()") from None
 
-    # This method allows the object to be implicitly converted to the (v1, v2, v3, v4) tuple.
     def __iter__(self):
-        """Allows direct unpacking: x, y, z, real = bno.quaternion"""
+        """Direct unpacking, ex: x, y, z, real = bno.quaternion"""
         try:
             x, y, z, real, _, _ = self._bno._report_values[self.feature_id]
             return iter((x, y, z, real))
@@ -822,9 +803,7 @@ class SensorFeature4:
 
 
 class RawSensorFeature:
-    """
-    raw reports Feature manager: raw_acceleration & raw_magnetic (data_count=3) and raw_gyro (data_count=4).
-    """
+    """ raw reports Feature manager: raw_acceleration & raw_magnetic (data_count=3) and raw_gyro (data_count=4)"""
     __slots__ = ("_bno", "feature_id", "data_count")
 
     def __init__(self, bno_instance, feature_id, data_count):
@@ -833,7 +812,6 @@ class RawSensorFeature:
         self.data_count = data_count
 
     def enable(self, hertz=None):
-        """Method to enable the feature with a given report rate (hertz)."""
         return self._bno.enable_feature(self.feature_id, hertz)
 
     @property
@@ -845,7 +823,6 @@ class RawSensorFeature:
 
     def __iter__(self):
         try:
-            # Slices the list/tuple from the beginning up to the number of sensor values
             sensor_values = self._bno._report_values[self.feature_id][:self.data_count]
             return iter(sensor_values)
         except KeyError:
@@ -915,7 +892,7 @@ class BNO08X:
         if self.ms_at_interrupt == 0:
             raise RuntimeError("No int_pin signals, check int_pin wiring")
 
-        # send channel 0 BNO_CHANNEL_SHTP_COMMAND, send _COMMAND_ADVERTISE (0) to get more sensor info with debug=True
+        # send _COMMAND_ADVERTISE (0) on channel BNO_CHANNEL_SHTP_COMMAND (0), more sensor info with debug=True
         self._dbg("*** Request _COMMAND_ADVERTISE")
         data = bytearray(2)
         data[0] = _COMMAND_ADVERTISE
@@ -925,7 +902,7 @@ class BNO08X:
         self._wake_signal()
         self._send_packet(SHTP_CHAN_COMMAND, data)
 
-        # wait for response, ignore packets until _GET_FEATURE_RESPONSE (0xfc)
+        # Process packets until Advertisement received
         start_time = ticks_ms()
         timeout_ms = _FEATURE_ENABLE_TIMEOUT * 1000
         while not self._advertisement_received:
@@ -1179,7 +1156,7 @@ class BNO08X:
         return axis, basis
 
     def clear_tare(self):
-        """ Clear the Tare data to flash. """
+        """ Clear the Tare data in flash. """
         self._dbg(f"TARE: Clear Tare...")
         self._send_me_command(_ME_TARE_COMMAND,
                               [_ME_TARE_SET_REORIENTATION, 0, 0, 0, 0, 0, 0, 0, 0, ]
@@ -1276,7 +1253,7 @@ class BNO08X:
     # ############### private/helper methods ###############
 
     def _parse_packets(self) -> int:
-        """ Parse packets and handle reports while data-ready is active."""
+        """ Parse packets into multiple reports, this must be efficient"""
         processed_count = 0
         max_packets = _MAX_PACKET_PROCESS
         end_time = ticks_ms() + 10  # 10ms guard time
@@ -1299,7 +1276,7 @@ class BNO08X:
             if data_length > 0 and packet_sh2[0] == 0x00:
                 continue
 
-            # --- START INLINED splits a packet into multiple reports ---
+            # --- START INLINED splits a packet into multiple reports
             next_byte_index = _SHTP_HEADER_LEN  # Payload after the 4-byte SHTP header
             while next_byte_index < data_length:
                 report_id = packet_sh2[next_byte_index]
@@ -1324,7 +1301,7 @@ class BNO08X:
                     report_view = packet_sh2
                     self._process_control_report(report_id, report_view)
                     break
-            # --- END INLINED splits a packet into multiple reports  ---
+            # --- END INLINED splits a packet into multiple reports
 
         return processed_count
 
@@ -1334,6 +1311,15 @@ class BNO08X:
         Extracted accuracy and delay from sensor report (100usec ticks)
         Multiple reports are processed in the order they appear in the packet buffer.
         Last sensor report's value over-write previous in this packet, ex: self._report_values[report_id],
+
+        will also check for and process all control reports, catch all if processing sensor reports
+        Must call self._process_control_report directly if reports coming from channel 0 or 1, because
+        they have two prolematic report ids (0x00, and 0x01 which is same as acceleration below).
+
+        Timestamps are msec since first sensor interrupt in float(FP) with 0.1ms resolution.
+        Host synched int or FP have problems such as overflow, wrap to quickly, or lack precision. 32-bit FP doesn't
+        have enough significant digits
+        Used to use problematic: self._sensor_ms = self.last_interrupt_ms - self._last_base_timestamp_us + delay_ms
         """
         # process typical sensor reports first
         if 0x01 <= report_id <= 0x09:
@@ -1357,21 +1343,18 @@ class BNO08X:
             byte2 = report_bytes[2]
             accuracy = byte2 & 0x03
             delay_raw = ((byte2 >> 2) << 8) | report_bytes[3]
-            delay_ms = delay_raw * 0.1  # notice delay_ms is a float, we have 0.1ms accuracy
+            delay_ms = delay_raw * 0.1  # delay_ms is a float, we have 0.1ms accuracy
 
             # remove self._dbg from time critical operations
             # self._dbg(f"Report: {_REPORTS_DICTIONARY[report_id]}\nData: {sensor_data}, {accuracy=}, {delay_ms=}")
 
-            # host-based msec timestamps: ints loose 0.1ms accuracy, 32-bit FP don't have enough significant digits
-            # self._sensor_ms = self.last_interrupt_ms - self._last_base_timestamp_us + delay_ms
-            # Best to use msec in float since first sensor interrupt
             self._sensor_ms = ticks_diff(self.ms_at_interrupt,
                                          self._epoch_start_ms) - self._last_base_timestamp_us * 0.001 + delay_ms
             self._report_values[report_id] = sensor_data + (accuracy, self._sensor_ms)
             self._unread_report_count[report_id] += 1
             return
 
-        #  **** Process all control reports, here because some are time-critical
+        #  **** Process all control reports, catchall if processing sensor reports
         if report_id >= 0xF0:
             self._process_control_report(report_id, report_bytes)
             return
@@ -1481,8 +1464,8 @@ class BNO08X:
             self._product_id_received = True
             return
 
-        # 0x00 first wake advertisement (280 byte payload, or 51 byte payload)
-        if report_id == 0x00:
+        # first wake advertisement (280 byte payload) or after command for advertisement (51 byte payload)
+        if report_id == _ADVERTISE_REPORT:
             self._dbg("*** Advertisement response on Channel 0x00")
             length = len(report_bytes)
             self._dbg("Data:")
@@ -1498,14 +1481,6 @@ class BNO08X:
             outstr += f"DBG::\t\t length = {length}\n"
             index = _SHTP_HEADER_LEN + 1
 
-            # Tag Processors: {tag_id: (name, format, subtract_header_4, clamp_max_1024)}
-            tag_dictionary = {0: ("TAG_NULL", 'S', 0, 0), 1: ("TAG_GUID", '<I', 0, 0),
-                              2: ("Max Cargo Write", '<H', 1, 0), 3: ("Max Cargo Read", '<H', 1, 0),
-                              4: ("TAG_MAX_TRANSFER_WRITE", '<H', 0, 1), 5: ("TAG_MAX_TRANSFER_READ", '<H', 0, 1),
-                              6: ("TAG_NORMAL_CHANNEL", '<B', 0, 0), 7: ("TAG_WAKE_CHANNEL", '<B', 0, 0),
-                              8: ("TAG_APP_NAME", 'S', 0, 0), 9: ("TAG_CHANNEL_NAME", 'S', 0, 0),
-                              10: ("TAG_ADV_COUNT", '<B', 0, 0), 0x80: ("Version", 'S', 0, 0)}
-
             while index < length:
                 tag, tag_len = report_bytes[index:index + 2]
                 value_index = index + 2
@@ -1513,11 +1488,11 @@ class BNO08X:
                 value = report_bytes[value_index:next_index]
                 index = next_index
 
-                if tag not in tag_dictionary:
+                if tag not in _tag_dictionary:
                     outstr += f"\t\t Unknown tag = {tag}\n"
                     continue
 
-                name, fmt, sub_hdr, clamp = tag_dictionary[tag]
+                name, fmt, sub_hdr, clamp = _tag_dictionary[tag]
                 if fmt == 'S':
                     s = "" if tag == 0 else f": {value.decode('ascii')}"
                     outstr += f"DBG::\t\t {name}{s}\n"
@@ -1535,7 +1510,7 @@ class BNO08X:
             self._advertisement_received = True
             return
 
-        if report_id == 0x01:
+        if report_id == _COMMAND_EXE_REPORT:
             self._dbg("Command Execution Response: SHTP_COMMAND (0x0)")
             self._dbg(" - Reset Complete Acknowledged, 0xf8 reports to follow\n")
             return
@@ -1657,7 +1632,7 @@ class BNO08X:
         if self._wake_pin is not None:
             self._dbg("WAKE pulse to BNO08x")
             self._wake_pin.value(0)
-            sleep_us(500)  # typ 150 usec required in datasheet BNO datasheet Fig 6-=11 Host Int timing SPI
+            sleep_us(500)  # todo typ 150 usec required in datasheet BNO datasheet Fig 6-=11 Host Int timing SPI
             self._wake_pin.value(1)
 
     def _send_packet(self, channel, data):
