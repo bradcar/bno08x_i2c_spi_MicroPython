@@ -37,7 +37,7 @@ import uctypes
 from machine import Pin
 from utime import ticks_ms, ticks_us, ticks_diff, sleep_us, sleep_ms
 
-from bno08x import BNO08X, Packet, PacketError, DATA_BUFFER_SIZE
+from bno08x import BNO08X, Packet, DATA_BUFFER_SIZE
 
 # TODO Need to find definitive value
 # 272 bytes shown in ll-test GitHub

@@ -15,7 +15,7 @@ from machine import Pin
 from micropython import const
 from utime import ticks_ms, ticks_diff, sleep_us
 
-from bno08x import BNO08X, Packet, PacketError
+from bno08x import BNO08X, Packet
 
 _BNO08X_DEFAULT_ADDRESS = const(0x4B)
 _BNO08X_BACKUP_ADDRESS = const(0x4A)

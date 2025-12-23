@@ -43,7 +43,7 @@ import uctypes
 from machine import Pin
 from utime import sleep_ms, sleep_us, ticks_ms, ticks_us, ticks_diff
 
-from bno08x import BNO08X, Packet, PacketError
+from bno08x import BNO08X, Packet
 
 # TODO Need to find definitive value
 # 272 bytes shown in ll-test GitHub
