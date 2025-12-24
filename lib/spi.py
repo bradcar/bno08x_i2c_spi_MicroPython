@@ -218,6 +218,6 @@ class BNO08X_SPI(BNO08X):
         self._rx_sequence_number[channel] = seq  # report sequence number
 
         # * comment out self._dbg for normal operation, adds 105ms delay even with debug=False
-        # self._dbg(f" Received Packet *************{new_packet} {packet_bytes=}")
+        # self._dbg(f" Received Packet *************{self._packet_decode(packet_bytes, channel, seq, self._data_buffer[4:packet_bytes])}")
 
         return self._data_buffer[4:packet_bytes], channel
