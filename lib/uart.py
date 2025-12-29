@@ -68,6 +68,8 @@ class BNO08X_UART(BNO08X):
         self._uart = uart
         self._debug = debug
         _interface = "UART"
+        while self._uart.any():
+            self._uart.read(self._uart.any())
 
         if int_pin is None:
             raise RuntimeError("int_pin is required for UART operation")
@@ -78,6 +80,10 @@ class BNO08X_UART(BNO08X):
         if reset_pin is not None and not isinstance(reset_pin, Pin):
             raise TypeError(f"reset_pin (RST) must be a Pin object or None, not {type(reset_pin)}")
         self._reset_pin = reset_pin
+        
+        self._header = bytearray(4)  # efficient spi handling of header read
+        self._header_mv = memoryview(self._header)
+        self._1byte = bytearray(1)  # efficient spi handling of header read
 
         # wake_pin must be NONE!  wake_pin/PS0 = 0 (gnd)
         super().__init__(_interface, reset_pin=reset_pin, int_pin=int_pin, cs_pin=None, wake_pin=None, debug=debug)
@@ -139,12 +145,12 @@ class BNO08X_UART(BNO08X):
         self._reset_pin.value(0)
         sleep_us(10)  # sleep_us(1), data sheet say only 10ns required,
         self._reset_pin.value(1)
-        sleep_ms(300)  # data sheet 6.5.3 Startup timing implies 94 ms needed
+        sleep_ms(100)  # data sheet 6.5.3 Startup timing implies 94 ms needed
 
-        # flush any uart data leftover from the previous run before the reset
-        while self._uart.any():
-            self._uart.read(self._uart.any())
-        self._dbg("*** UART Cleared stale UART buffer after reset")
+#         # flush any uart data leftover from the previous run before the reset
+#         while self._uart.any():
+#             self._uart.read(self._uart.any())
+#         self._dbg("*** UART Cleared stale UART buffer after reset")
 
         self._dbg("*** Hard Reset End in UART, awaiting acknowledgement (0xf8)\n")
 
@@ -155,6 +161,7 @@ class BNO08X_UART(BNO08X):
     def _send_packet(self, channel, data):
         """ 1.2.3.1 UART Operation:"Bytes sent to the BNO08X must be separated by at least 100us."""
         seq = self._tx_sequence_number[channel]
+        self._dbg(f"DEBUG: Sending on Chan {channel} with TX Seq {seq}")
         data_length = len(data)
         write_length = data_length + 4
         send_packet = bytearray(pack("<HBB", write_length, channel, seq) + data)
@@ -184,104 +191,191 @@ class BNO08X_UART(BNO08X):
         self._tx_sequence_number[channel] = (seq + 1) % 256
         return self._tx_sequence_number[channel]
 
+#     def _read_into(self, buf, start, end):
+#         """used to read UART data for all reads, if encounter escap 0x7D it will read extra byte"""
+#         idx = start
+#         while idx < end:
+#             data = self._uart.read(1)
+#             try:
+#                 b = data[0]
+#             except TypeError as e:
+#                 raise RuntimeError(f"_read_into Timeout reading data byte {idx}") from e
+# 
+#             if b == 0x7D:  # control escape
+#                 data = self._uart.read(1)
+#                 try:
+#                     b = data[0]
+#                 except TypeError as e:
+#                     raise RuntimeError(f"_read_into Timeout reading escape sequence byte {idx}") from e
+#                 b ^= 0x20  # transform escaped byte
+# 
+#             buf[idx] = b
+#             idx += 1  # Only increment once a logical byte is stored
+
     def _read_into(self, buf, start, end):
-        """used to read UART data for all reads, if encounter escap 0x7D it will read extra byte"""
+        """Used to read UART data for all reads. Handles 0x7D escape sequences."""
         idx = start
         while idx < end:
-            data = self._uart.read(1)
-            try:
-                b = data[0]
-            except TypeError as e:
-                raise RuntimeError(f"_read_into Timeout reading data byte {idx}") from e
+            # Read exactly 1 byte into our pre-allocated buffer
+            if self._uart.readinto(self._1byte, 1) == 0:
+                raise RuntimeError(f"_read_into Timeout: No data at byte {idx}")
 
-            if b == 0x7D:  # control escape
-                data = self._uart.read(1)
-                try:
-                    b = data[0]
-                except TypeError as e:
-                    raise RuntimeError(f"_read_into Timeout reading escape sequence byte {idx}") from e
-                b ^= 0x20  # transform escaped byte
+            b = self._1byte[0]
+
+            if b == 0x7D:  # Control escape detected
+                # Read the next byte to be transformed
+                if self._uart.readinto(self._1byte, 1) == 0:
+                    raise RuntimeError(f"_read_into Timeout: Missing byte after escape at {idx}")
+                
+                b = self._1byte[0] ^ 0x20  # Transform the byte
 
             buf[idx] = b
-            idx += 1  # Only increment once a logical byte is stored
+            idx += 1
+
+#     def _read_packet(self, wait=None):
+#         if not self._new_data_interrupt and self._uart.any() < 1:
+#         # if not self._new_data_interrupt:
+# 
+#             return None # NOTE: not a tuple! must check for None first, then unpack return
+# #         if self._uart.any() < 7: # Min packet: 7E + 01 + 4-byte header + 7E
+# #             return None
+#         
+# #         wait = bool(wait)  # both wait=None wait=False are non-blocking
+# #         if wait:
+# #             if self._uart.any() == 0:
+# #                 self._wait_for_int()  # Will raise a timeout if no new interrupt after 10ms
+# 
+#         # ---start--- UART Header read - handle SHTP protocol: 
+#         # UART read until read 0x7E start byte
+#         start_time_read = ticks_ms()
+#         while True:
+#             data = self._uart.read(1)
+#             if not data:
+#                 if ticks_diff(ticks_ms(), start_time_read) > 100:
+#                     return None
+#                 continue
+#             if data[0] == 0x7E:
+#                 break
+# 
+#         # Skip any additional 0x7E bytes
+#         while True:
+#             data = self._uart.read(1)
+#             if not data:
+#                 return None
+#             if data[0] != 0x7E:
+#                 break
+# 
+#         # Read the SHTP Protocol ID (0x01)
+#         if data[0] != 0x01:
+#             return None
+#             # raise RuntimeError(f"_read_packet header: Didn't find SHTP Protocol ID 0x01, saw {hex(data[0])}")
+# 
+#         # Read header bytes
+#         self._read_into(self._header_mv, start=0, end=4)
+#         # ----end---- UART Header read - handle SHTP protocol: 
+# 
+#         h = self._header
+#         raw_packet_bytes = h[0] | (h[1] << 8)
+#         if raw_packet_bytes == 0:  # fast return if 0 payload
+#             # self._dbg("_read_packet: packet_bytes=0, returning None.")
+#             return None # NOTE: not a tuple! must check for None first, then unpack return
+#         channel = h[2]
+#         seq = h[3]
+#         
+#         # * comment out self._dbg for normal operation, adds delay even with debug=False
+#         # self._dbg(f" _read_packet Header {hex(raw_packet_bytes)}, {channel=}, {seq=}")
+# 
+#         self._rx_sequence_number[channel] = seq  # SH2 Sequence number
+# 
+#         if raw_packet_bytes == 0xFFFF:  # bad sensor data 
+#             raise OSError(f"FATAL BNO08X Error: Invalid SHTP header(0xFFFF), BNO08x sensor corrupted?")
+# 
+#         payload_bytes = (raw_packet_bytes & 0x7FFF) - 4
+# 
+#         if payload_bytes > len(self._data_buffer):
+#             self._data_buffer = bytearray(payload_bytes)
+# 
+#         if payload_bytes <= _SHTP_MAX_CARGO_PACKET_BYTES:
+# 
+#             # UART Payload read, because CS was not de-asserted
+#             mv = memoryview(self._data_buffer)[:payload_bytes]
+#             self._read_into(mv, start=0, end=payload_bytes)
+# 
+#             data = self._uart.read(1)
+#             if not data:
+#                 raise RuntimeError("_read_packet payload: Timeout while waiting for packet end")
+# 
+#             b = data[0]
+#             if b != 0x7E:
+#                 #raise RuntimeError(f"_read_packet payload: Didn't find UART end 0x7e, saw {hex(b)}")
+#                 return None
+#             # ----end---- UART Payload read
 
     def _read_packet(self, wait=None):
-        wait = bool(wait)  # both wait=None wait=False are non-blocking
-        if wait:
-            if self._uart.any() == 0:
-                self._wait_for_int()  # Will raise a timeout if no new interrupt after 10ms
-
-        # Buffer for Read of 4-byte SHTP header and later payload
-        header_mv = memoryview(self._data_buffer)[:4]
+        if not self._new_data_interrupt and self._uart.any() < 1:
+            return None 
 
         # ---start--- UART Header read - handle SHTP protocol: 
         # UART read until read 0x7E start byte
         start_time_read = ticks_ms()
         while True:
-            data = self._uart.read(1)
-            if not data:
+            # Replaced self._uart.read(1) with readinto
+            if self._uart.readinto(self._1byte, 1) == 0:
                 if ticks_diff(ticks_ms(), start_time_read) > 100:
-                    return None, None
+                    return None
                 continue
-            if data[0] == 0x7E:
+            if self._1byte[0] == 0x7E:
                 break
 
         # Skip any additional 0x7E bytes
         while True:
-            data = self._uart.read(1)
-            if not data:
-                return None, None
-            if data[0] != 0x7E:
+            if self._uart.readinto(self._1byte, 1) == 0:
+                return None
+            if self._1byte[0] != 0x7E:
                 break
 
-        # Read the SHTP Protocol ID (0x01)
-        if data[0] != 0x01:
-            raise RuntimeError(f"_read_packet header: Didn't find SHTP Protocol ID 0x01, saw {hex(data[0])}")
+        # Check the SHTP Protocol ID (0x01)
+        # self._1byte[0] currently holds the first byte after the 0x7E sequence
+        if self._1byte[0] != 0x01:
+            return None
 
-        # Read header bytes
-        self._read_into(header_mv, start=0, end=4)
-        # ----end---- UART Header read - handle SHTP protocol: 
+        # Read header bytes (uses the refactored _read_into internally)
+        self._read_into(self._header_mv, start=0, end=4)
 
-        header_view = uctypes.struct(uctypes.addressof(self._data_buffer), _HEADER_STRUCT, uctypes.LITTLE_ENDIAN)
-        raw_packet_bytes = header_view.packet_bytes
-        if raw_packet_bytes == 0:  # fast return if 0 payload
-            # self._dbg("_read_packet: packet_bytes=0, returning None, None.")
-            return None, None
+        h = self._header
+        raw_packet_bytes = h[0] | (h[1] << 8)
+        if raw_packet_bytes == 0:
+            return None 
+            
+        channel = h[2]
+        seq = h[3]
 
-        channel = header_view.channel
-        seq = header_view.sequence
-        # * comment out self._dbg for normal operation, adds delay even with debug=False
-        # self._dbg(f" _read_packet Header {hex(raw_packet_bytes)}, {channel=}, {seq=}")
+        self._rx_sequence_number[channel] = seq 
 
-        self._rx_sequence_number[channel] = seq  # SH2 Sequence number
-
-        if raw_packet_bytes == 0xFFFF:  # bad sensor data 
+        if raw_packet_bytes == 0xFFFF: 
             raise OSError(f"FATAL BNO08X Error: Invalid SHTP header(0xFFFF), BNO08x sensor corrupted?")
 
-        packet_bytes = raw_packet_bytes & 0x7FFF
+        payload_bytes = (raw_packet_bytes & 0x7FFF) - 4
 
-        if packet_bytes > len(self._data_buffer):
-            self._data_buffer = bytearray(packet_bytes)
+        if payload_bytes > len(self._data_buffer):
+            self._data_buffer = bytearray(payload_bytes)
 
-        if packet_bytes <= _SHTP_MAX_CARGO_PACKET_BYTES:
-            mv = memoryview(self._data_buffer)[:packet_bytes]
+        if payload_bytes <= _SHTP_MAX_CARGO_PACKET_BYTES:
+            mv = memoryview(self._data_buffer)[:payload_bytes]
+            # Read payload using refactored _read_into
+            self._read_into(mv, start=0, end=payload_bytes)
 
-            # ---start--- UART Payload read
-            self._read_into(mv, start=4, end=packet_bytes)
-
-            data = self._uart.read(1)
-            if not data:
+            # Replaced self._uart.read(1) with readinto for packet termination
+            if self._uart.readinto(self._1byte, 1) == 0:
                 raise RuntimeError("_read_packet payload: Timeout while waiting for packet end")
 
-            b = data[0]
-            if b != 0x7E:
-                raise RuntimeError(f"_read_packet payload: Didn't find UART end 0x7e, saw {hex(b)}")
-            # ----end---- UART Payload read 
+            if self._1byte[0] != 0x7E:
+                return None
 
         else:
-            print(f"FRAGMENTED PACKET - {packet_bytes=} and {_SHTP_MAX_CARGO_PACKET_BYTES=}")
+            print(f"FRAGMENTED PACKET - {raw_packet_bytes=} and {_SHTP_MAX_CARGO_PACKET_BYTES=}")
             print(f"***** NEED to implement multi-packet reads, erasing header")
-            print(f"* Have yet to see packet_bytes > 193 bytes, algorithm sketched out")
+            print(f"* Have yet to see raw_packet_bytes > 193 bytes, algorithm sketched out")
             print(f"* Ceva and others have no clear documentation of the max cargo bytes value")
             print(f"{self._data_buffer}")
             raise NotImplementedError("The multi-packet reads are NOT unimplemented. TODO")
@@ -291,18 +385,18 @@ class BNO08X_UART(BNO08X):
             # this should have continuation bit set
             continuation = bool(raw_packet_bytes & 0x8000)
             if continuation:
-                self._dbg(f"CONTINUATION in _read_packet: {packet_bytes=}")
+                self._dbg(f"CONTINUATION in _read_packet: {raw_packet_bytes=}")
                 # raise PacketError("read partial packet")
 
         self._rx_sequence_number[channel] = seq  # report sequence number
 
         # * comment out self._dbg for normal operation, adds 105ms delay even with debug=False
-        # self._dbg(f" Received Packet *************{self._print_decode_string(packet_bytes, channel, seq, mv[4:])}")
+        # self._dbg(f" Received Packet *************{self._packet_decode(payload_bytes + 4, channel, seq, mv)}")
 
-        return self._data_buffer[4:packet_bytes], channel
+        return  mv, channel
 
-    @property
-    def _data_ready(self):
-        """UART variant also has uart.any() fallback"""
-        # self._dbg(f"_data_ready: {self._uart.any()}")
-        return self._uart.any() >= 4
+#     @property
+#     def _data_ready(self):
+#         """UART variant also has uart.any() fallback"""
+#         # self._dbg(f"_data_ready: {self._uart.any()}")
+#         return self._uart.any() >= 4

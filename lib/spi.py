@@ -33,7 +33,6 @@ Each Sensor needs:
 """
 from struct import pack
 
-import uctypes
 from machine import Pin
 from utime import ticks_us, ticks_diff, sleep_us, sleep_ms
 
@@ -45,13 +44,6 @@ from bno08x import BNO08X
 #     BUT, then Arduino code subtracts 4, which is header size?
 # 252: Advertisement spi, i2c, and uart:  header+payload = 256
 _SHTP_MAX_CARGO_PACKET_BYTES = 284
-
-_HEADER_STRUCT = {
-    "packet_bytes": (uctypes.UINT16 | 0),
-    "channel": (uctypes.UINT8 | 2),
-    "sequence": (uctypes.UINT8 | 3),
-}
-
 
 def _is_spi(obj) -> bool:
     """Check that SPI object has required interfaces"""
@@ -109,6 +101,7 @@ class BNO08X_SPI(BNO08X):
         self._reset_pin = reset_pin
 
         self._header = bytearray(4)  # efficient spi handling of header read
+        self._header_mv = memoryview(self._header)
 
         super().__init__(_interface, reset_pin=reset_pin, int_pin=int_pin, cs_pin=cs_pin, wake_pin=wake_pin,
                          debug=debug)
@@ -148,30 +141,29 @@ class BNO08X_SPI(BNO08X):
         return
 
     def _read_packet(self, wait=None):
-        wait = bool(wait)  # both wait=None wait=False are non-blocking
-        if not wait and self._int_pin.value() != 0:
-            return None, None
+        if self._int_pin.value() != 0:
+            return None # NOTE: not a tuple! must check for None first, then unpack return
+#         wait = bool(wait)  # wait=None & wait=False are non-blocking
+#         if not wait and self._int_pin.value() != 0:
+#             return None # NOTE: not a tuple! must check for None first, then unpack return
+# 
+#         if wait and self._int_pin.value() != 0:
+#             self._wait_for_int()
 
-        if wait and self._int_pin.value() != 0:
-            self._wait_for_int()
-
-        header_mv = memoryview(self._header)
-        # ---start--- SPI Header read
+        # SPI Header read
         self._cs_pin.value(0)
         sleep_us(1)
-        self._spi.readinto(header_mv, 0x00)
-        # Not:e CS is still 0, must raise to (1) after payload read, or when errors out
-        # ----end---- SPI Header read 
+        self._spi.readinto(self._header_mv, 0x00)
+        # NOTE: CS is still 0, must raise to (1) after payload read, or when errors out
 
-        header_view = uctypes.struct(uctypes.addressof(self._header), _HEADER_STRUCT, uctypes.LITTLE_ENDIAN)
-        raw_packet_bytes = header_view.packet_bytes
+        h = self._header
+        raw_packet_bytes = h[0] | (h[1] << 8)
         if raw_packet_bytes == 0:  # fast return if 0 payload
             self._cs_pin.value(1)
             # self._dbg("_read_packet: packet_bytes=0, returning None.")
-            return None, None
-
-        channel = header_view.channel
-        seq = header_view.sequence
+            return None # NOTE: not a tuple! must check for None first, then unpack return
+        channel = h[2]
+        seq = h[3]
 
         # * comment out self._dbg for normal operation, adds delay even with debug=False
         # self._dbg(f"packet header: {packet_bytes=} {channel=} {seq=} ")
@@ -182,19 +174,17 @@ class BNO08X_SPI(BNO08X):
             self._cs_pin.value(1)
             raise OSError(f"FATAL BNO08X Error: Invalid SHTP header(0xFFFF), BNO08x sensor corrupted?")
 
-        packet_bytes = raw_packet_bytes & 0x7FFF
+        payload_bytes = (raw_packet_bytes & 0x7FFF) - 4
 
-        if packet_bytes > len(self._data_buffer):
-            self._data_buffer = bytearray(packet_bytes)
+        if payload_bytes > len(self._data_buffer):
+            self._data_buffer = bytearray(payload_bytes)
 
-        if packet_bytes <= _SHTP_MAX_CARGO_PACKET_BYTES:
-            # read payload, note since CS is not de-asserted this is payload only read
-            mv = memoryview(self._data_buffer)[4:packet_bytes]
+        if payload_bytes <= _SHTP_MAX_CARGO_PACKET_BYTES:
 
-            # ---start--- SPI Payload read
+            # SPI Payload read, because CS was not de-asserted
+            mv = memoryview(self._data_buffer)[:payload_bytes]
             self._spi.readinto(mv, 0x00)
             self._cs_pin.value(1)
-            # ----end---- SPI Payload read
 
         else:
             print(
@@ -218,6 +208,6 @@ class BNO08X_SPI(BNO08X):
         self._rx_sequence_number[channel] = seq  # report sequence number
 
         # * comment out self._dbg for normal operation, adds 105ms delay even with debug=False
-        # self._dbg(f" Received Packet *************{self._packet_decode(packet_bytes, channel, seq, self._data_buffer[4:packet_bytes])}")
+        # self._dbg(f" Received Packet *************{self._packet_decode(payload_bytes + 4, channel, seq, mv)}")
 
-        return self._data_buffer[4:packet_bytes], channel
+        return mv, channel

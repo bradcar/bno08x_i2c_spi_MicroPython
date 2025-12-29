@@ -44,33 +44,32 @@ Delay
 
 Data sent for single sensor report:
 Quaternion = timebase + sensor report = 23 bytes
-* i2c rereads header (uart doesn't) so i2c reads 27 bytes
+* I2C re-reads header (SPI & UART don't) so I2C must read 27 bytes (23+4)
 
 Raw Interface Payload frequencies (freq & any framing)
- - spi (3_000_000) is 1.2x faster than UART (3_000_000)
- - spi (3_000_000) is 8.4x faster than I2C (3_000_000).
- - uart (3_000_000) is 6.9x faster than i2c (400_000).
+ - SPI (3_000_000) is 1.2x faster than UART (3_000_000)
+ - SPI (3_000_000) is 8.4x faster than I2C (3_000_000).
+ - UART (3_000_000) is 6.9x faster than I2C (400_000).
 
 but i2c & spi must also reread header, 1.1739 penalty (27/23) for quaternion
  - SPI is 1.04x faster than UART.  (76.666/73.737 = 1.0397)
  - SPI is 6.9x faster than I2C.  (622.077/73.737 = 8.436)
  - UART is 8.1x faster than I2C.  (622.0773/76.666 = 8.114)
 
-Current best sensor update periods - BNO086 responded with 1ms update frequeny:
-- spi:   ?.?ms (476 Hz)
-- uart:  2.7ms (370 Hz) with 2.5ms report frequency
-- i2c:   4.7ms (208 Hz) with 2.5ms report frequency
+Current best sensor update periods - BNO086 responded with 1 ms update frequeny:
+- spi:   2.0ms (500 Hz) with acc at 2.0ms (500 Hz)
+- uart:  2.2ms (454 Hz) with acc at 2.0ms (500 Hz)
+- i2c:   ?ms (? Hz) with ? ms report frequency
 At report frequencies shorter than above, the period will increase, likey because the host isn't
 keeping up with the sensor and the sensor packages multiple packets together and this library only
 returns data for the latest of each package of reports.
 
-TODO: check _parse_packets processing timed out, 10ms, seems reports backing up
-TODO:
+TODO: it seems getting multiple reports per timebase at higher freq. Are interrupts being addressed?
+TODO: Don't reslice payload, just pass _process_report pointers?
+TODO: Convert interrupt flag to counter (if high rates)?
+TODO: reorg method order
+TODO: inline _insert_command_request_report
 TODO: implement continiuation codes for i2c, spi, and uart
-
-TODO: on SPI, (2.5ms reports), ~31 of 500 iters, show _parse_packets processing timed out, 10ms, why? backing up
-TODO: on SPI, (5ms reports), ~1 of 1000 iters, show _parse_packets processing timed out, 10ms, why? backing up
-TODO: on UART, (2.5ms reports), ~8 of 1000 iters, show _parse_packets processing timed out, 10ms, why? backing up
 
 Possible future projects:
 FUTURE: Capture all report data in a multi-package report (without overwrite), provide user all results
@@ -79,7 +78,7 @@ FUTURE: include estimated ange in full quaternion implementation, maybe make new
 FUTURE: process two ARVR reports (rotation vector has estimated angle which has a different Q-point)
 """
 
-__version__ = "0.9.6"
+__version__ = "0.9.7"
 __repo__ = "https://github.com/bradcar/bno08x_i2c_spi_MicroPython"
 
 from math import asin, atan2, degrees
@@ -133,12 +132,14 @@ _COMMAND_EXE_REPORT = const(0x01)  # Report to Acknowledge Command execute
 _COMMAND_RESET = const(0x01)  # Soft Reset command on Chan 0
 
 # Advertisement Tag Processors: {tag_id: (name, format, subtract_header_4, clamp_max_1024)}
-_tag_dictionary = {0: ("TAG_NULL", 'S', 0, 0), 1: ("TAG_GUID", '<I', 0, 0),
-                   2: ("Max Cargo Write", '<H', 1, 0), 3: ("Max Cargo Read", '<H', 1, 0),
-                   4: ("TAG_MAX_TRANSFER_WRITE", '<H', 0, 1), 5: ("TAG_MAX_TRANSFER_READ", '<H', 0, 1),
-                   6: ("TAG_NORMAL_CHANNEL", '<B', 0, 0), 7: ("TAG_WAKE_CHANNEL", '<B', 0, 0),
-                   8: ("TAG_APP_NAME", 'S', 0, 0), 9: ("TAG_CHANNEL_NAME", 'S', 0, 0),
-                   10: ("TAG_ADV_COUNT", '<B', 0, 0), 0x80: ("Version", 'S', 0, 0)}
+_tag_dictionary = {0: ("TAG_NULL", 'S', 0), 1: ("TAG_GUID", '<I', 0),
+                   2: ("Max Cargo Write", '<H', 1), 3: ("Max Cargo Read", '<H', 1),
+                   4: ("TAG_MAX_TRANSFER_WRITE", '<H', 0), 5: ("TAG_MAX_TRANSFER_READ", '<H', 0),
+                   6: ("TAG_NORMAL_CHANNEL", '<B', 0), 7: ("TAG_WAKE_CHANNEL", '<B', 0),
+                   8: ("TAG_APP_NAME", 'S', 0), 9: ("TAG_CHANNEL_NAME", 'S', 0),
+                   10: ("TAG_ADV_COUNT", '<B', 0), 0x80: ("SHTP Version", 'S', 0),
+                   0x81: ("Report List, lengths", 'R', 0)
+                   }
 
 # Status Constants
 _COMMAND_STATUS_SUCCESS = 0
@@ -491,10 +492,7 @@ class SensorFeature1:
 
     @property
     def updated(self):
-        if self._bno._unread_report_count[self.feature_id] > 0:
-            self._bno._unread_report_count[self.feature_id] = 0
-            return True
-        return False
+        return self._bno._unread_report_count[self.feature_id] > 0
 
     @property
     def value(self):
@@ -726,8 +724,8 @@ class BNO08X:
         self._interface = _interface
         self._debug = debug
 
-        # set int_pin interrupt, Active-low interrupt → falling edge
-        self._int_pin.irq(trigger=Pin.IRQ_FALLING, handler=self._on_interrupt)
+        # set int_pin first interrupt, Active-low interrupt → falling edge, which sets all others to _fast_interrupt
+        self._int_pin.irq(trigger=Pin.IRQ_FALLING, handler=self._first_interrupt)
 
         self._dbg(f"********** __init__ on {self._interface} Interface *************\n")
         self._data_buffer: bytearray = bytearray(DATA_BUFFER_SIZE)
@@ -737,13 +735,16 @@ class BNO08X:
         self.last_interrupt_us = -1  # used to signal first interrupt
         self.prev_interrupt_us = -1
         self.ms_at_interrupt = 0
-        self._data_available = False
         self._sensor_epoch_ms = 0.0
         self._last_base_timestamp_us = 0
+        self._new_data_interrupt = False
 
         # track RX(inbound) and TX(outbound) sequence numbers one per channel, one per direction
         self._rx_sequence_number: list[int] = [0, 0, 0, 0, 0, 0]
         self._tx_sequence_number: list[int] = [0, 0, 0, 0, 0, 0]
+        self._max_cargo_write = 0
+        self._advertisement_received = False
+
 
         self._dcd_saved_at: float = -1
         self._me_calibration_started_at: float = -1.0
@@ -763,48 +764,36 @@ class BNO08X:
         if self.ms_at_interrupt == 0:
             raise RuntimeError("No int_pin signals, check int_pin wiring")
 
-        # send _COMMAND_ADVERTISE (0) on channel BNO_CHANNEL_SHTP_COMMAND (0), more sensor info with debug=True
-        self._dbg("*** Request _COMMAND_ADVERTISE")
-        data = bytearray(2)
-        data[0] = _COMMAND_ADVERTISE
-        data[1] = 0
-        self._advertisement_received = False
-
-        self._wake_signal()
-        self._send_packet(SHTP_CHAN_COMMAND, data)
-
-        # Process packets until Advertisement received
-        start_time = ticks_ms()
-        timeout_ms = _FEATURE_ENABLE_TIMEOUT * 1000
-        while not self._advertisement_received:
-            self._parse_packets()
-
-            if ticks_diff(ticks_ms(), start_time) > timeout_ms:
-                raise RuntimeError(f"BNO08X init: Timed out waiting for Advertise response")
-
-        self._dbg(f"Advertisement Received on Channel 0\n")
-        self._advertisement_received = False
-
         self._dbg("********** End __init__ *************\n")
 
-    def _on_interrupt(self, pin):
+    def _first_interrupt(self, pin):
         """
         Interrupt handler for active-low int_pin (H_INTN). At first interrupt captures host & bno time
-         * self._sensor_epoch_ms set to 0.0 ms at first interrupt
          * self._epoch_start_ms set to ticks_ms() at first interrupt
          * self.last_interrupt_ms set for timebase calculations
         """
-        if self.last_interrupt_us == -1:
-            self._epoch_start_ms = ticks_ms()  # self._sensor_epoch_ms = 0.0  set in __init__
         self.prev_interrupt_us = self.last_interrupt_us
         self.last_interrupt_us = ticks_us()
         self.ms_at_interrupt = ticks_ms()
-        self._data_available = True
+        self._new_data_interrupt = True
+        # set epoch start ms on first interrupt
+        self._epoch_start_ms = ticks_ms()
+        # Rebind the IRQ to the fast handler
+        pin.irq(handler=self._fast_interrupt)
+    
+    def _fast_interrupt(self, pin):
+        """
+        Interrupt handler for active-low int_pin (H_INTN). At first interrupt captures host & bno time
+        """
+        self.prev_interrupt_us = self.last_interrupt_us
+        self.last_interrupt_us = ticks_us()
+        self.ms_at_interrupt = ticks_ms()
+        self._new_data_interrupt = True
 
     def reset_sensor(self):
-        """ After power on, sensor seems to require hard reset, soft reset may be useful after hard reset."""
+        """ After power on, sensor requires synchronization before Product ID Request."""
         self._product_id_received = False
-        self._reset_mismatch = False  # if reset_pin set make sure hardware reset done, else pin bad
+        self._reset_mismatch = False 
 
         if self._reset_pin:
             self._hard_reset()
@@ -813,23 +802,31 @@ class BNO08X:
             self._soft_reset()
             reset_type = "Soft"
 
-        self._dbg("********** Check ID **********")
-        self._dbg(f"Send PRODUCT_ID_REQUEST (0xf9) on channel 2, await Product ID 0xF8 response")
+        # BNO08x sends an Advertisement (Chan 0) and Reset Complete (Chan 2)
+        self._dbg("Wait for Advertisement after reset and Reset Complete")
+        sync_start = ticks_ms()
+        while not self._advertisement_received and ticks_diff(ticks_ms(), sync_start) < 500:
+            if self._parse_packets() > 0:
+                sync_start = ticks_ms() 
+            sleep_ms(10)
+
+        # Verify Reset with Request Product ID
+        self._dbg("Request Product ID to verify Reset")
+        self._dbg(f"Sending PRODUCT_ID_REQUEST (0xf9) on channel 2")
         data = bytearray(2)
         data[0] = _REPORT_PRODUCT_ID_REQUEST
         data[1] = 0
         self._wake_signal()
         self._send_packet(SHTP_CHAN_CONTROL, data)
 
-        # Process packets until product_id_received
+        # Await Product ID Response
         start = ticks_ms()
-        while not self._product_id_received and ticks_diff(ticks_ms(), start) < 1000:
-            self._parse_packets()
+        while not self._product_id_received and ticks_diff(ticks_ms(), start) < 3000:
+            if self._new_data_interrupt:
+                self._parse_packets()
 
         if self._product_id_received and not self._reset_mismatch:
-            self._dbg(f"*** {reset_type} reset success, acknowledged with first Product ID 0xF8 response\n")
-            self._tx_sequence_number = [0, 0, 0, 0, 0, 0]
-            self._rx_sequence_number = [0, 0, 0, 0, 0, 0]
+            self._dbg(f"*** {reset_type} reset success, acknowledged with first Product ID 0xF8\n")
             return
 
         if self._reset_mismatch:
@@ -838,7 +835,7 @@ class BNO08X:
         raise RuntimeError(f"{reset_type} reset not acknowledged, check BNO086 wiring")
 
     def _packet_decode(self, packet_length, channel, seq, payload):
-        """Packet decode for debugging driver, read/send packets decoded"""
+        """Packet decode for debugging driver for both read & send packets"""
         outstr = "\n\t\t********** Packet *************\n"
         outstr += "DBG::\t\tHeader:\n"
         outstr += f"DBG::\t\t Packet Len: {packet_length} ({hex(packet_length)})\n"
@@ -863,7 +860,7 @@ class BNO08X:
 
         # preliminary decoding of packets
         if packet_length - _SHTP_HEADER_LEN == 15 and channel == SHTP_CHAN_INPUT and report_id == 0xfb:
-            outstr += f"DBG::\t\t first report: {_REPORTS_DICTIONARY[payload[5]]} ({hex(payload[5])})\n"
+            outstr += f"DBG::\t\t Report 1: {_REPORTS_DICTIONARY[payload[5]]} ({hex(payload[5])})\n"
 
         # New Stye Advertisement Response provides sensor information
         if packet_length - _SHTP_HEADER_LEN >= 51 and channel == SHTP_CHAN_COMMAND and report_id == _COMMAND_ADVERTISE:
@@ -881,6 +878,11 @@ class BNO08X:
 
     def update_sensors(self):
         return self._parse_packets()
+# todo: remove seems 1 every >700 packets sees 2 packets
+#         num = self._parse_packets()
+#         if num > 1:
+#             print(f" Number packets >1, {num} packets")
+#         return num
 
     # 3-Tuple Sensor Reports + accuracy + timestamp
     @property
@@ -1181,50 +1183,57 @@ class BNO08X:
     # ############### private Core Engine methods ###############
 
     def _parse_packets(self) -> int:
-        """ Parse packets into multiple reports, this must be efficient"""
+        """
+        Parse packets into multiple reports, this must be efficient
+        
+        TODO: process based on channel likely should always expect multiple reports per packet
+                channel 2: Timebase, rebase and Sensors (Sensors always follow timebase?)
+                Channel 5: High-speed Gyro (single reports)
+                Channel 3: Command reports (Multiple single reports, ex: F1,F8's)
+                Channel 0: SHTP command (single reports)
+                Channel 1: Executable (single reports)
+
+        """
         processed_count = 0
-        max_packets = _MAX_PACKET_PROCESS
-        end_time = ticks_ms() + 10  # 10ms guard time
-        report_length_map = _REPORT_LENGTHS
+        report_length_map = _REPORT_LENGTHS.get
 
-        while self._data_ready and processed_count < max_packets:
-            if processed_count > 0 and ticks_diff(ticks_ms(), end_time) >= 0:
-                self._dbg("_parse_packets processing timed out, 10ms")
+        #while (self._new_data_interrupt or self._int_pin.value() == 0) and processed_count < _MAX_PACKET_PROCESS:
+        while self._new_data_interrupt or (hasattr(self, "_uart") and self._uart.any() >= 4):    
+            self._new_data_interrupt = False
+            
+            result = self._read_packet(wait=False)
+            if result is None: 
                 break
-
-            payload, channel = self._read_packet(wait=False)
-            if payload is None:
-                break
+            payload, channel = result
+            payload_mv = memoryview(payload)
 
             processed_count += 1
-            data_length = len(payload)
+            data_length = len(payload_mv)
 
-            # --- START INLINED splits a packet into multiple reports
-            next_byte_index = 0
-            while next_byte_index < data_length:
-                report_id = payload[next_byte_index]
-                if channel in [2, 3, 5]:
-                    required_bytes = report_length_map.get(report_id, 0)
+            # Splits payload into multiple reports and process
+            if channel == 2 or channel == 3 or channel == 5:
+                next_byte_index = 0
+                while next_byte_index < data_length:
+                    report_id = payload_mv[next_byte_index] 
+                    required_bytes = report_length_map(report_id, 0)
 
                     if required_bytes == 0:
                         self._dbg(f"UNSUPPORTED Report ID {hex(report_id)} - SKIPPING ONE BYTE")
                         next_byte_index += 1
                         continue
 
-                    unprocessed_byte_count = data_length - next_byte_index
-                    if unprocessed_byte_count < required_bytes:
-                        self._dbg(f"UNSUPPORTED truncated packet ERROR: {unprocessed_byte_count} bytes")
+                    if data_length - next_byte_index < required_bytes:
+                        self._dbg(f"UNSUPPORTED truncated packet ERROR: {data_length - next_byte_index} bytes")
                         break
-
-                    report_view = payload[next_byte_index: next_byte_index + required_bytes]
-                    self._process_report(report_id, report_view)
+                    
+                    self._process_report(report_id, payload_mv[next_byte_index: next_byte_index + required_bytes])
                     next_byte_index += required_bytes
 
-                if channel in (0, 1):  # all reports on channel 0 & 1 are single reports
-                    report_view = payload
-                    self._process_control_report(report_id, report_view)
-                    break
-            # --- END INLINED splits a packet into multiple reports
+            elif channel == 0:  # all reports on channel 0 are single reports
+                self._process_control_report(0x00, payload_mv)
+                
+            elif channel == 1:  # all reports on channel 1 are single reports
+                self._process_control_report(payload_mv[0], payload_mv)
 
         return processed_count
 
@@ -1270,6 +1279,18 @@ class BNO08X:
                                          self._epoch_start_ms) - self._last_base_timestamp_us * 0.001 + delay_ms
             self._report_values[report_id] = sensor_data + (accuracy, self._sensor_ms)
             self._unread_report_count[report_id] += 1
+            return
+        
+        # Base Timestamp (0xfb)
+        if report_id == _BASE_TIMESTAMP:
+            self._last_base_timestamp_us = (
+                report_bytes[1] | (report_bytes[2] << 8) | (report_bytes[3] << 16) | (report_bytes[4] << 24)) * 100
+            return
+
+        # Timestamp Rebase (0xfa), this sent when _BASE_TIMESTAMP wraps
+        if report_id == _TIMESTAMP_REBASE:
+            self._last_base_timestamp_us = (
+                report_bytes[1] | (report_bytes[2] << 8) | (report_bytes[3] << 16) | (report_bytes[4] << 24)) * 100
             return
 
         #  **** Process all control reports, catchall if processing sensor reports
@@ -1330,34 +1351,36 @@ class BNO08X:
         """ Process control reports. These are only on Channel 0, 1, or 2 """
         # Base Timestamp (0xfb)
         if report_id == _BASE_TIMESTAMP:
-            self._last_base_timestamp_us = unpack_from("<I", report_bytes, 1)[0] * 100
+            self._last_base_timestamp_us = (
+                report_bytes[1] | (report_bytes[2] << 8) | (report_bytes[3] << 16) | (report_bytes[4] << 24)) * 100
             return
 
         # Timestamp Rebase (0xfa), this sent when _BASE_TIMESTAMP wraps
         if report_id == _TIMESTAMP_REBASE:
-            self._last_base_timestamp_us = unpack_from("<I", report_bytes, 1)[0] * 100
+            self._last_base_timestamp_us = (
+                report_bytes[1] | (report_bytes[2] << 8) | (report_bytes[3] << 16) | (report_bytes[4] << 24)) * 100
             return
 
         # Feature response (0xfc) - This report issued when feature is enabled or updated
         if report_id == _GET_FEATURE_RESPONSE:
             feature_report_id = report_bytes[1]
-            report_interval = unpack_from("<I", report_bytes, 5)[0]
-            self._report_values[feature_report_id] = _INITIAL_REPORTS.get(feature_report_id, (0.0, 0.0, 0.0, 0, 0.0))
             self._unread_report_count[feature_report_id] = 0
+            self._report_values[feature_report_id] = _INITIAL_REPORTS.get(feature_report_id, (0.0, 0.0, 0.0, 0, 0.0))
+            report_interval = unpack_from("<I", report_bytes, 5)[0]
             self._report_periods_dictionary_us[feature_report_id] = report_interval
             self._dbg(f"Enabled Report: {_REPORTS_DICTIONARY[feature_report_id]}: {hex(feature_report_id)}")
-            self._dbg(f" Report Interval: {report_interval / 1000.0:.1f} ms")
+            self._dbg(f" Actual Report Interval: {report_interval / 1000.0:.1f} ms")
             self._dbg(f" All Enabled tuples = {self._report_values}\n")
             return
 
-        # Command Response (0xf1) - confirms re-set(i2c & spi), ME or DCD
+        # Command Response (0xf1) - confirms reset on i2c/spi, ME, and DCD responses
         if report_id == _COMMAND_RESPONSE:
-            self._dbg(f"***Command response (0xf1)")
+            self._dbg(f"Command response (0xf1)")
             command = report_bytes[2]
             # if command < 128:  # command & 0x80 == 0, ** removed to cut code size, info not that helpful
             #    self._dbg(f" - Response due to Command Request\n")
             if command & 0x7f == 4:
-                self._dbg(" - Command to Re-Initialzed BNO08x received\n")
+                self._dbg("Received: Command to Re-Initialze BNO08x\n")
             return
 
         # Product ID Response (0xf8)
@@ -1383,17 +1406,28 @@ class BNO08X:
             return
 
         # first wake advertisement (280 byte payload) or after command for advertisement (51 byte payload)
+        # Advertisement encoded with TLV (Type-Length-Value)
         if report_id == _ADVERTISE_REPORT:
-            self._dbg("*** Advertisement response on Channel 0x00")
+            self._dbg("Advertisement response on Channel 0x00")
             length = len(report_bytes)
-            outstr = f"\nDBG::\t\t Data Len: {length}"
-            for idx, packet_byte in enumerate(report_bytes):
-                if (idx % 4) == 0:
-                    outstr += f"\nDBG::\t\t[0x{idx:02X}] "
-                outstr += f"0x{packet_byte:02X} "
+            
+            outstr = ""
+            # outstr = f"\nDBG::\t\t Data Len: {length}"
+            # for idx, packet_byte in enumerate(report_bytes):
+            #     if (idx % 4) == 0:
+            #         outstr += f"\nDBG::\t\t[0x{idx:02X}] "
+            #     outstr += f"0x{packet_byte:02X} "
+            # outstr += "\n\t\t*******************************"
 
-            outstr += "\n\t\t*******************************"
-            outstr += "\n\t\tAdvertisement Response TLV Decoding:\n"
+            if length > 2:
+                outstr += "\n\t\t Advertisement TLV Decode:\n"
+            else:
+                outstr = f"\nDBG::\t\t Data Len: {length}"
+                for idx, packet_byte in enumerate(report_bytes):
+                    if (idx % 4) == 0:
+                        outstr += f"\nDBG::\t\t[0x{idx:02X}] "
+                    outstr += f"0x{packet_byte:02X} "
+                outstr += "\n\t\t*******************************"
 
             index = 1  # skip the Report ID (0x00) at payload[0]
             while index + 2 <= length:
@@ -1408,17 +1442,28 @@ class BNO08X:
                 value = report_bytes[value_index:next_index]
 
                 if tag in _tag_dictionary:
-                    name, fmt, sub_hdr, clamp = _tag_dictionary[tag]
+                    name, fmt, sub_hdr = _tag_dictionary[tag]
 
                     if fmt == 'S':
                         decoded_str = bytes(value).decode('utf-8', 'ignore').strip('\x00')
                         s = "" if tag == 0 else f": {decoded_str}"
                         outstr += f"DBG::\t\t {name}{s}\n"
+                    # report and length of each report, already statically defined
+                    elif fmt == 'R':
+                        outstr += "DBG::\t\t *NOTE* Did not decode Report ID and lengths in Advertisement\n"
+                        # outstr += f"DBG::\t\t {name} (Report List):\n"
+                        # sub_idx = 0
+                        # while sub_idx < len(value):
+                        #     rep_id = value[sub_idx]
+                        #     rep_len = value[sub_idx + 1]
+                        #     outstr += f"DBG::\t\t   Report 0x{rep_id:02X}, Length: {rep_len}\n"
+                        #    sub_idx += 2
                     else:
                         v = unpack_from(fmt, value, 0)[0]
                         if sub_hdr: v -= 4
-                        if clamp: v = min(v, 1024)
                         outstr += f"DBG::\t\t {name}: {v}\n"
+                    if tag == 2:
+                        self._max_cargo_write = v
                 else:
                     outstr += f"DBG::\t\t Unknown tag = {tag}\n"
 
@@ -1428,9 +1473,9 @@ class BNO08X:
             self._advertisement_received = True
             return
 
+        # Command execution report 0x01, on Channel 0x0
         if report_id == _COMMAND_EXE_REPORT:
-            self._dbg("Command Execution Response: SHTP_COMMAND (0x0)")
-            self._dbg(" - Reset Complete Acknowledged, 0xf8 reports to follow\n")
+            self._dbg("Command Execution Received on Channel (0x0)")
             return
 
     def _handle_command_response(self, report_bytes: bytearray) -> None:
@@ -1504,6 +1549,7 @@ class BNO08X:
                 raise RuntimeError(f"BNO08X: Timeout enabling feature: {hex(feature_id)}")
 
         actual_interval = self._report_periods_dictionary_us[feature_id]
+        # Return frequency
         return 1_000_000. / actual_interval if actual_interval > 0 else 0.0
 
     def print_report_period(self):
@@ -1526,24 +1572,24 @@ class BNO08X:
         if not self._reset_pin:
             return
 
-        self._dbg("*** Hard Reset starting...")
+        self._dbg("Hard Reset starting...")
         self._reset_pin.value(1)
         sleep_ms(10)
         self._reset_pin.value(0)
         sleep_us(10)  # sleep_us(1), data sheet say only 10ns required,
         self._reset_pin.value(1)
         sleep_ms(500)  # orig was 10ms, datasheet implies 94 ms required
-        self._dbg("*** Hard Reset End, awaiting acknowledgement (0xf8)\n")
+        self._dbg("Hard Reset End, awaiting acknowledgement (0xf8)\n")
 
     def _soft_reset(self) -> None:
         """Send the 'reset' command packet on Executable Channel (1), Section 1.3.1 SHTP"""
-        self._dbg(f"*** Soft Reset, Channel={SHTP_CHAN_EXE} command={_COMMAND_RESET}, starting...")
+        self._dbg(f"Soft Reset, Channel={SHTP_CHAN_EXE} command={_COMMAND_RESET}, starting...")
         reset_payload = bytearray([_COMMAND_RESET])
         self._wake_signal()
         self._send_packet(SHTP_CHAN_EXE, reset_payload)
         sleep_ms(500)
         start_time = ticks_ms()
-        self._dbg("*** Soft Reset End, awaiting acknowledgement (0xf8)")
+        self._dbg("Soft Reset End, awaiting acknowledgement (0xf8)")
 
     def _wake_signal(self):
         """ Wake is only performaed for spi operation  """
@@ -1558,12 +1604,6 @@ class BNO08X:
 
     def _read_packet(self, wait):
         raise RuntimeError("_read_packet Not implemented in bno08x.py, supplanted by I2C or SPI subclass")
-
-    @property
-    def _data_ready(self):
-        """ Returns True if at least one new interrupt seen """
-        return self.last_interrupt_us != self.prev_interrupt_us
-
 
 # must define alias after BNO08X class, so class SensorReading4 class can use this
 euler_conversion = BNO08X.euler_conversion
