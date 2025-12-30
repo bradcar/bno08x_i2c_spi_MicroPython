@@ -27,12 +27,6 @@ _BNO08X_BACKUP_ADDRESS = const(0x4A)
 # 252: Advertisement spi, i2c, and uart:  header+payload = 256
 _SHTP_MAX_CARGO_PACKET_BYTES = 284
 
-_HEADER_STRUCT = {
-    "packet_bytes": (uctypes.UINT16 | 0),
-    "channel": (uctypes.UINT8 | 2),
-    "sequence": (uctypes.UINT8 | 3),
-}
-
 
 def _is_i2c(obj) -> bool:
     """ Check that i2c object has required interfaces """
@@ -84,6 +78,9 @@ class BNO08X_I2C(BNO08X):
         if reset_pin is not None and not isinstance(reset_pin, Pin):
             raise TypeError(f"Reset (RST) pin must be a Pin object or None, not {type(reset_pin)}")
         self._reset = reset_pin
+        
+        self._header = bytearray(4)  # efficient spi handling of header read
+        self._header_mv = memoryview(self._header)
 
         # I2C can not use cs_pin or wake_pin
         super().__init__(_interface, reset_pin=reset_pin, int_pin=int_pin, cs_pin=None, wake_pin=None, debug=debug)
@@ -110,6 +107,9 @@ class BNO08X_I2C(BNO08X):
             if self.last_interrupt_us != initial_int_time:
                 return
             sleep_us(10)
+            
+        if self._int.value() == 0:
+            return
 
         raise RuntimeError(f"_wait_for_int timeout ({ticks_diff(ticks_ms(), start_time)}ms) waiting for int_pin")
 
@@ -131,42 +131,38 @@ class BNO08X_I2C(BNO08X):
         wait = bool(wait)  # both wait=None wait=False are non-blocking        
         # In I2C, data is ready if the INT pin is low OR if the user requested to wait.
         if not wait and self._int.value() != 0:
-            return None, None
+            return None
 
         if wait or self._int.value() == 0:
             if self._int.value() != 0:
                 self._wait_for_int()  # Will raise a timeout if no new interrupt after 10ms
 
         # Read 4-byte SHTP header and process
-        header_mv = memoryview(self._data_buffer)[:4]
-        self._i2c.readfrom_into(self._bno_i2c_addr, header_mv)
+        self._i2c.readfrom_into(self._bno_i2c_addr, self._header_mv)
 
-        #         header_view = uctypes.struct(uctypes.addressof(self._data_buffer), _HEADER_STRUCT, uctypes.LITTLE_ENDIAN)
-        #         raw_packet_bytes = header_view.packet_bytes
-        #         channel = header_view.channel
-        #         seq = header_view.sequence
-        # TODO remove uctypes
-
-        raw = bytes(header_mv)  # forces materialization of bytearray
-        raw_packet_bytes = raw[0] | (raw[1] << 8)
-        if raw_packet_bytes == 0:  # Fast return, if only SHTP header
-            return None, None
-
-        channel = raw[2]
-        seq = raw[3]
+        h = self._header
+        raw_packet_bytes = h[0] | (h[1] << 8)
+        if raw_packet_bytes == 0:  # fast return if 0 payload
+            # self._dbg("_read_packet: packet_bytes=0, returning None.")
+            return None # NOTE: not a tuple! must check for None first, then unpack return
+        channel = h[2]
+        seq = h[3]
+        
         self._rx_sequence_number[channel] = seq  # SH2 Sequence number
 
         if raw_packet_bytes == 0xFFFF:  # bad sensor         
             raise OSError(f"FATAL BNO08X Error: Invalid SHTP header(0xFFFF), sensor corrupted?")
 
         packet_bytes = raw_packet_bytes & 0x7FFF
+        payload_bytes = packet_bytes - 4
 
         if packet_bytes > len(self._data_buffer):
             self._data_buffer = bytearray(packet_bytes)
 
         if packet_bytes <= _SHTP_MAX_CARGO_PACKET_BYTES:
-            mv = memoryview(self._data_buffer)[:packet_bytes]
-            self._i2c.readfrom_into(self._bno_i2c_addr, mv)
+            header_payload_mv = memoryview(self._data_buffer)[:packet_bytes]
+            self._i2c.readfrom_into(self._bno_i2c_addr, header_payload_mv)
+            mv = header_payload_mv[4:]
         else:
             print(f"FRAGMENTED PACKET - {packet_bytes=} and {_SHTP_MAX_CARGO_PACKET_BYTES=}")
             print(f"***** NEED to implement multi-packet reads, erasing header")
@@ -186,7 +182,7 @@ class BNO08X_I2C(BNO08X):
         self._rx_sequence_number[channel] = seq  # report sequence number
 
         # * comment out self._dbg for normal operation, adds 105ms delay even with debug=False
-        # self._dbg(f" Received Packet *************{self._print_decode_string(packet_bytes, channel, seq, mv[4:])}")
+        # self._dbg(f" Received Packet *************{self._packet_decode(payload_bytes + 4, channel, seq, mv)}")
 
         # return packet's payload and channel, payload_length can be derived len(payload)
-        return mv[4:], channel
+        return mv, channel
