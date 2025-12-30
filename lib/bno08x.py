@@ -850,11 +850,12 @@ class BNO08X:
                 # first report_id (self.data[0]), the report type to be enabled (self.data[1])
                 outstr += f"DBG::\t\t Feature Enabled: {_REPORTS_DICTIONARY[payload[1]]} ({hex(payload[1])})\n"
         outstr += "\nDBG::\t\tData:\n"
-        outstr += f"DBG::\t\t Data Len: {packet_length - _SHTP_HEADER_LEN}"
-        for idx, packet_byte in enumerate(payload[:packet_length - _SHTP_HEADER_LEN]):
-            packet_index = idx
-            if (packet_index % 4) == 0:
-                outstr += f"\nDBG::\t\t[0x{packet_index:02X}] "
+        payload_length = packet_length - _SHTP_HEADER_LEN
+        outstr += f"DBG::\t\t Data Len: {payload_length}"
+        for idx in range (payload_length):
+            packet_byte = payload[idx]
+            if (idx % 4) == 0:
+                outstr += f"\nDBG::\t\t[0x{idx:02X}] "
             outstr += f"0x{packet_byte:02X} "
         outstr += "\n\t\t*******************************\n"
 
@@ -1204,11 +1205,9 @@ class BNO08X:
             result = self._read_packet(wait=False)
             if result is None: 
                 break
-            payload, channel = result
+            payload, channel, data_length = result
             payload_mv = memoryview(payload)
-
             processed_count += 1
-            data_length = len(payload_mv)
 
             # Splits payload into multiple reports and process
             if channel == 2 or channel == 3 or channel == 5:

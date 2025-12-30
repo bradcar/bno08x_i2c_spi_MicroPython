@@ -161,7 +161,7 @@ class BNO08X_I2C(BNO08X):
 
         if packet_bytes <= _SHTP_MAX_CARGO_PACKET_BYTES:
             header_payload_mv = memoryview(self._data_buffer)[:packet_bytes]
-            self._i2c.readfrom_into(self._bno_i2c_addr, header_payload_mv)
+            self._i2c.readfrom_into(self._bno_i2c_addr, header_payload_mv, packet_bytes)
             mv = header_payload_mv[4:]
         else:
             print(f"FRAGMENTED PACKET - {packet_bytes=} and {_SHTP_MAX_CARGO_PACKET_BYTES=}")
@@ -182,7 +182,7 @@ class BNO08X_I2C(BNO08X):
         self._rx_sequence_number[channel] = seq  # report sequence number
 
         # * comment out self._dbg for normal operation, adds 105ms delay even with debug=False
-        # self._dbg(f" Received Packet *************{self._packet_decode(payload_bytes + 4, channel, seq, mv)}")
+        self._dbg(f" Received Packet *************{self._packet_decode(payload_bytes + 4, channel, seq, mv)}")
 
         # return packet's payload and channel, payload_length can be derived len(payload)
-        return mv, channel
+        return mv, channel, payload_bytes

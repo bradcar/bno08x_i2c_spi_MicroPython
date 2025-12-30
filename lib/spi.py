@@ -210,4 +210,4 @@ class BNO08X_SPI(BNO08X):
         # * comment out self._dbg for normal operation, adds 105ms delay even with debug=False
         # self._dbg(f" Received Packet *************{self._packet_decode(payload_bytes + 4, channel, seq, mv)}")
 
-        return mv, channel
+        return mv, channel, payload_bytes
