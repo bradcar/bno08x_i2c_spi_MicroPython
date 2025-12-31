@@ -100,11 +100,11 @@ BNO_CHAN_GYRO_ROTATION_VECTOR = const(5)  # high-priority head tracking - Not im
 
 channels = {
     0x0: "SHTP_CHAN_COMMAND",
-    0x1: "SHTP_CHAN_EXE",
-    0x2: "SHTP_CHAN_CONTROL",
-    0x3: "SHTP_CHAN_INPUT",
+    0x1: "SHTP_CHAN_EXE",  # Commands
+    0x2: "SHTP_CHAN_CONTROL",  # Sensor report and timestamps (technically command reports)
+    0x3: "SHTP_CHAN_INPUT",  # Command reports
     0x4: "SHTP_CHAN_WAKE_INPUT",
-    0x5: "BNO_CHAN_GYRO_ROTATION_VECTOR",
+    0x5: "BNO_CHAN_GYRO_ROTATION_VECTOR",  # high-speed gyro and rotation
 }
 
 _SHTP_HEADER_LEN = 4
@@ -426,11 +426,8 @@ _SENSOR_SCALING = {
 _SENSOR_REPORT_LAYOUT = {
     "report_id": 0 | uctypes.UINT8,
     "status": 1 | uctypes.UINT8,
-
-    # byte2 contains accuracy+delay high bits, byte 3 has delay low bits
-    "byte2": 2 | uctypes.UINT8,
-    "byte3": 3 | uctypes.UINT8,
-
+    "byte2": 2 | uctypes.UINT8,  # byte2 contains accuracy+delay high bits
+    "byte3": 3 | uctypes.UINT8,  # byte 3 has delay low bits
     "v1": 4 | uctypes.INT16,
     "v2": 6 | uctypes.INT16,
     "v3": 8 | uctypes.INT16,  # valid for 3-tuple reports
@@ -732,9 +729,8 @@ class BNO08X:
         self._data_buffer_memoryview = memoryview(self._data_buffer)
         self._command_buffer: bytearray = bytearray(12)
         self._packet_slices = []
-        self.last_interrupt_us = -1  # used to signal first interrupt
-        self.prev_interrupt_us = -1
-        self.ms_at_interrupt = 0
+        self.last_interrupt_us = -1  # us at last interrupt
+        self.ms_at_interrupt = 0  # ms at last interrupt, us and ms are indepedently clocking/wrapping
         self._sensor_epoch_ms = 0.0
         self._last_base_timestamp_us = 0
         self._new_data_interrupt = False
@@ -744,7 +740,6 @@ class BNO08X:
         self._tx_sequence_number: list[int] = [0, 0, 0, 0, 0, 0]
         self._max_cargo_write = 0
         self._advertisement_received = False
-
 
         self._dcd_saved_at: float = -1
         self._me_calibration_started_at: float = -1.0
@@ -768,24 +763,20 @@ class BNO08X:
 
     def _first_interrupt(self, pin):
         """
-        Interrupt handler for active-low int_pin (H_INTN). At first interrupt captures host & bno time
+        int_pin Interrupt handler for active-low (H_INTN). At first interrupt captures host & bno time
          * self._epoch_start_ms set to ticks_ms() at first interrupt
          * self.last_interrupt_ms set for timebase calculations
         """
-        self.prev_interrupt_us = self.last_interrupt_us
         self.last_interrupt_us = ticks_us()
         self.ms_at_interrupt = ticks_ms()
         self._new_data_interrupt = True
         # set epoch start ms on first interrupt
         self._epoch_start_ms = ticks_ms()
-        # Rebind the IRQ to the fast handler
+        # Rebind the IRQ to the fast interrupt handler
         pin.irq(handler=self._fast_interrupt)
-    
+
     def _fast_interrupt(self, pin):
-        """
-        Interrupt handler for active-low int_pin (H_INTN). At first interrupt captures host & bno time
-        """
-        self.prev_interrupt_us = self.last_interrupt_us
+        """int_pin Interrupt handler for active-low (H_INTN). Other handler _first_interrupt captures host & bno time"""
         self.last_interrupt_us = ticks_us()
         self.ms_at_interrupt = ticks_ms()
         self._new_data_interrupt = True
@@ -793,7 +784,7 @@ class BNO08X:
     def reset_sensor(self):
         """ After power on, sensor requires synchronization before Product ID Request."""
         self._product_id_received = False
-        self._reset_mismatch = False 
+        self._reset_mismatch = False
 
         if self._reset_pin:
             self._hard_reset()
@@ -807,12 +798,11 @@ class BNO08X:
         sync_start = ticks_ms()
         while not self._advertisement_received and ticks_diff(ticks_ms(), sync_start) < 500:
             if self._parse_packets() > 0:
-                sync_start = ticks_ms() 
+                sync_start = ticks_ms()
             sleep_ms(10)
 
         # Verify Reset with Request Product ID
-        self._dbg("Request Product ID to verify Reset")
-        self._dbg(f"Sending PRODUCT_ID_REQUEST (0xf9) on channel 2")
+        self._dbg("Verify rest by Sending PRODUCT_ID_REQUEST (0xf9) on channel 2")
         data = bytearray(2)
         data[0] = _REPORT_PRODUCT_ID_REQUEST
         data[1] = 0
@@ -852,7 +842,7 @@ class BNO08X:
         outstr += "\nDBG::\t\tData:\n"
         payload_length = packet_length - _SHTP_HEADER_LEN
         outstr += f"DBG::\t\t Data Len: {payload_length}"
-        for idx in range (payload_length):
+        for idx in range(payload_length):
             packet_byte = payload[idx]
             if (idx % 4) == 0:
                 outstr += f"\nDBG::\t\t[0x{idx:02X}] "
@@ -879,11 +869,12 @@ class BNO08X:
 
     def update_sensors(self):
         return self._parse_packets()
-# todo: remove seems 1 every >700 packets sees 2 packets
-#         num = self._parse_packets()
-#         if num > 1:
-#             print(f" Number packets >1, {num} packets")
-#         return num
+
+    # todo: remove seems 1 every >700 packets sees 2 packets
+    #         num = self._parse_packets()
+    #         if num > 1:
+    #             print(f" Number packets >1, {num} packets")
+    #         return num
 
     # 3-Tuple Sensor Reports + accuracy + timestamp
     @property
@@ -1003,8 +994,7 @@ class BNO08X:
     @property
     def activity_classifier(self):
         """Returns the sensor's assessment of the activity:
-        * "Unknown", "In-Vehicle", "On-Bicycle", "On-Foot", "Still"
-        * "Tilting", "Walking"     "Running",    "On Stairs"
+        * "Unknown", "In-Vehicle", "On-Bicycle", "On-Foot", "Still" "Tilting", "Walking", "Running", "On Stairs"
         """
         report_id = BNO_REPORT_ACTIVITY_CLASSIFIER
         if report_id not in self._features:  # If object not found, create and cache it
@@ -1188,51 +1178,90 @@ class BNO08X:
         Parse packets into multiple reports, this must be efficient
         
         TODO: process based on channel likely should always expect multiple reports per packet
-                channel 2: Timebase, rebase and Sensors (Sensors always follow timebase?)
+                channel 3: Timebase, rebase and Sensors (Sensors always follow timebase?)
                 Channel 5: High-speed Gyro (single reports)
-                Channel 3: Command reports (Multiple single reports, ex: F1,F8's)
-                Channel 0: SHTP command (single reports)
+                Channel 2: Command reports (Multiple single reports, ex: F1,F8's)
                 Channel 1: Executable (single reports)
-
+                Channel 0: SHTP command (single reports)
         """
+        FP_DIV_TEN = 0.1
+        FP_TO_MS = 0.001
         processed_count = 0
         report_length_map = _REPORT_LENGTHS.get
 
-        #while (self._new_data_interrupt or self._int_pin.value() == 0) and processed_count < _MAX_PACKET_PROCESS:
-        while self._new_data_interrupt or (hasattr(self, "_uart") and self._uart.any() >= 4):    
+        while self._new_data_interrupt or (hasattr(self, "_uart") and self._uart.any() >= 4):
             self._new_data_interrupt = False
-            
+
             result = self._read_packet(wait=False)
-            if result is None: 
+            if result is None:
                 break
             payload, channel, data_length = result
-            payload_mv = memoryview(payload)
+            p_mv = memoryview(payload)
             processed_count += 1
+            report_index = 0
+            report_id = p_mv[report_index]
+
+            # fast path for timestamp & reports in a single packet, inlined from self._process_report
+            if channel == 3 and report_id == _BASE_TIMESTAMP:
+                self._last_base_timestamp_us = (p_mv[1] | (p_mv[2] << 8) | (p_mv[3] << 16) | (p_mv[4] << 24)) * 100
+                packet_base_ms = ticks_diff(self.ms_at_interrupt, self._epoch_start_ms) - (
+                            self._last_base_timestamp_us * FP_TO_MS)
+                report_index += 5  # _BASE_TIMESTAMP is 5 bytes
+
+                p = p_mv
+                while report_index < data_length:
+                    report_id = p[report_index]
+                    required_bytes = report_length_map(report_id, 0)
+                    if required_bytes == 0: break
+                    scalar, count = _SENSOR_SCALING.get(report_id, (0, 0))
+
+                    idx = report_index
+                    b2 = p[idx + 2]
+                    accuracy = b2 & 0x03
+                    delay_ms = (((b2 & 0xFC) << 6) | p[idx + 3]) * FP_DIV_TEN
+                    r = p[idx + 4] | (p[idx + 5] << 8)
+                    v1 = (r if r < 32768 else r - 65536) * scalar
+                    r = p[idx + 6] | (p[idx + 7] << 8)
+                    v2 = (r if r < 32768 else r - 65536) * scalar
+                    r = p[idx + 8] | (p[idx + 9] << 8)
+                    v3 = (r if r < 32768 else r - 65536) * scalar
+
+                    if count == 3:
+                        sensor_data = (v1, v2, v3)
+                    else:  # Handle Quaternion V4
+                        r = p[idx + 10] | (p[idx + 11] << 8)
+                        v4 = (r if r < 32768 else r - 65536) * scalar
+                        sensor_data = (v1, v2, v3, v4)
+
+                    self._sensor_ms = packet_base_ms + delay_ms
+                    self._report_values[report_id] = sensor_data + (accuracy, self._sensor_ms)
+                    self._unread_report_count[report_id] += 1
+                    report_index += required_bytes
+                continue
 
             # Splits payload into multiple reports and process
-            if channel == 2 or channel == 3 or channel == 5:
-                next_byte_index = 0
-                while next_byte_index < data_length:
-                    report_id = payload_mv[next_byte_index] 
+            if channel == 3 or channel == 2 or channel == 5:
+                while report_index < data_length:
+                    report_id = p_mv[report_index]
                     required_bytes = report_length_map(report_id, 0)
 
                     if required_bytes == 0:
                         self._dbg(f"UNSUPPORTED Report ID {hex(report_id)} - SKIPPING ONE BYTE")
-                        next_byte_index += 1
+                        report_index += 1
                         continue
 
-                    if data_length - next_byte_index < required_bytes:
-                        self._dbg(f"UNSUPPORTED truncated packet ERROR: {data_length - next_byte_index} bytes")
+                    if data_length - report_index < required_bytes:
+                        self._dbg(f"UNSUPPORTED truncated packet ERROR: {data_length - report_index} bytes")
                         break
-                    
-                    self._process_report(report_id, payload_mv[next_byte_index: next_byte_index + required_bytes])
-                    next_byte_index += required_bytes
+
+                    self._process_report(report_id, p_mv[report_index: report_index + required_bytes])
+                    report_index += required_bytes
 
             elif channel == 0:  # all reports on channel 0 are single reports
-                self._process_control_report(0x00, payload_mv)
-                
+                self._process_control_report(0x00, p_mv)
+
             elif channel == 1:  # all reports on channel 1 are single reports
-                self._process_control_report(payload_mv[0], payload_mv)
+                self._process_control_report(p_mv[0], p_mv)
 
         return processed_count
 
@@ -1279,17 +1308,19 @@ class BNO08X:
             self._report_values[report_id] = sensor_data + (accuracy, self._sensor_ms)
             self._unread_report_count[report_id] += 1
             return
-        
+
         # Base Timestamp (0xfb)
         if report_id == _BASE_TIMESTAMP:
             self._last_base_timestamp_us = (
-                report_bytes[1] | (report_bytes[2] << 8) | (report_bytes[3] << 16) | (report_bytes[4] << 24)) * 100
+                                                   report_bytes[1] | (report_bytes[2] << 8) | (
+                                                   report_bytes[3] << 16) | (report_bytes[4] << 24)) * 100
             return
 
         # Timestamp Rebase (0xfa), this sent when _BASE_TIMESTAMP wraps
         if report_id == _TIMESTAMP_REBASE:
             self._last_base_timestamp_us = (
-                report_bytes[1] | (report_bytes[2] << 8) | (report_bytes[3] << 16) | (report_bytes[4] << 24)) * 100
+                                                   report_bytes[1] | (report_bytes[2] << 8) | (
+                                                   report_bytes[3] << 16) | (report_bytes[4] << 24)) * 100
             return
 
         #  **** Process all control reports, catchall if processing sensor reports
@@ -1351,13 +1382,15 @@ class BNO08X:
         # Base Timestamp (0xfb)
         if report_id == _BASE_TIMESTAMP:
             self._last_base_timestamp_us = (
-                report_bytes[1] | (report_bytes[2] << 8) | (report_bytes[3] << 16) | (report_bytes[4] << 24)) * 100
+                                                   report_bytes[1] | (report_bytes[2] << 8) | (
+                                                   report_bytes[3] << 16) | (report_bytes[4] << 24)) * 100
             return
 
         # Timestamp Rebase (0xfa), this sent when _BASE_TIMESTAMP wraps
         if report_id == _TIMESTAMP_REBASE:
             self._last_base_timestamp_us = (
-                report_bytes[1] | (report_bytes[2] << 8) | (report_bytes[3] << 16) | (report_bytes[4] << 24)) * 100
+                                                   report_bytes[1] | (report_bytes[2] << 8) | (
+                                                   report_bytes[3] << 16) | (report_bytes[4] << 24)) * 100
             return
 
         # Feature response (0xfc) - This report issued when feature is enabled or updated
@@ -1409,7 +1442,7 @@ class BNO08X:
         if report_id == _ADVERTISE_REPORT:
             self._dbg("Advertisement response on Channel 0x00")
             length = len(report_bytes)
-            
+
             outstr = ""
             # outstr = f"\nDBG::\t\t Data Len: {length}"
             # for idx, packet_byte in enumerate(report_bytes):
@@ -1603,6 +1636,7 @@ class BNO08X:
 
     def _read_packet(self, wait):
         raise RuntimeError("_read_packet Not implemented in bno08x.py, supplanted by I2C or SPI subclass")
+
 
 # must define alias after BNO08X class, so class SensorReading4 class can use this
 euler_conversion = BNO08X.euler_conversion
