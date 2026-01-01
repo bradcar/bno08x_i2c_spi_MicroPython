@@ -1184,10 +1184,14 @@ class BNO08X:
                 Channel 1: Executable (single reports)
                 Channel 0: SHTP command (single reports)
         """
-        FP_DIV_TEN = 0.1
         FP_TO_MS = 0.001
+        FP_DIV_TEN = 0.1
+        SIGN_BIT = 32768
         processed_count = 0
         report_length_map = _REPORT_LENGTHS.get
+        scaling_map = _SENSOR_SCALING.get
+        report_values = self._report_values
+        unread_report_count = self._unread_report_count
 
         while self._new_data_interrupt or (hasattr(self, "_uart") and self._uart.any() >= 4):
             self._new_data_interrupt = False
@@ -1199,7 +1203,7 @@ class BNO08X:
             p_mv = memoryview(payload)
             processed_count += 1
             report_index = 0
-            report_id = p_mv[report_index]
+            report_id = p_mv[0]
 
             # fast path for timestamp & reports in a single packet, inlined from self._process_report
             if channel == 3 and report_id == _BASE_TIMESTAMP:
@@ -1208,38 +1212,39 @@ class BNO08X:
                             self._last_base_timestamp_us * FP_TO_MS)
                 report_index += 5  # _BASE_TIMESTAMP is 5 bytes
 
+                # native compiled fast pah - test showed it was slower?
+                # self._sensor_fast_path(p_mv, data_length, 5, packet_base_ms, report_length_map, scaling_map, 
+                #                              report_values, unread_counts)
                 p = p_mv
                 while report_index < data_length:
                     report_id = p[report_index]
                     required_bytes = report_length_map(report_id, 0)
                     if required_bytes == 0: break
-                    scalar, count = _SENSOR_SCALING.get(report_id, (0, 0))
+                    scalar, count = scaling_map(report_id, (0, 0))
 
                     idx = report_index
                     b2 = p[idx + 2]
-                    accuracy = b2 & 0x03
-                    delay_ms = (((b2 & 0xFC) << 6) | p[idx + 3]) * FP_DIV_TEN
+                    #accuracy = b2 & 0x03
+                    ts = packet_base_ms + (((b2 & 0xFC) << 6) | p[idx + 3]) * FP_DIV_TEN
                     r = p[idx + 4] | (p[idx + 5] << 8)
-                    v1 = (r if r < 32768 else r - 65536) * scalar
+                    v1 = (r - ((r & SIGN_BIT) << 1)) * scalar
                     r = p[idx + 6] | (p[idx + 7] << 8)
-                    v2 = (r if r < 32768 else r - 65536) * scalar
+                    v2 = (r - ((r & SIGN_BIT) << 1)) * scalar
                     r = p[idx + 8] | (p[idx + 9] << 8)
-                    v3 = (r if r < 32768 else r - 65536) * scalar
+                    v3 = (r - ((r & SIGN_BIT) << 1)) * scalar
 
                     if count == 3:
-                        sensor_data = (v1, v2, v3)
+                        report_values[report_id] = (v1, v2, v3, b2 & 0x03, ts)
                     else:  # Handle Quaternion V4
                         r = p[idx + 10] | (p[idx + 11] << 8)
-                        v4 = (r if r < 32768 else r - 65536) * scalar
-                        sensor_data = (v1, v2, v3, v4)
-
-                    self._sensor_ms = packet_base_ms + delay_ms
-                    self._report_values[report_id] = sensor_data + (accuracy, self._sensor_ms)
-                    self._unread_report_count[report_id] += 1
+                        v4 = (r - ((r & SIGN_BIT) << 1)) * scalar
+                        report_values[report_id] = (v1, v2, v3, v4, b2 & 0x03, ts)
+                    
+                    unread_report_count[report_id] += 1
                     report_index += required_bytes
                 continue
 
-            # Splits payload into multiple reports and process
+            # Split payload into multiple reports and process
             if channel == 3 or channel == 2 or channel == 5:
                 while report_index < data_length:
                     report_id = p_mv[report_index]
@@ -1264,6 +1269,40 @@ class BNO08X:
                 self._process_control_report(p_mv[0], p_mv)
 
         return processed_count
+    
+#     @micropython.native
+#     def _sensor_fast_path(self, p, data_length, report_index, packet_base_ms, 
+#                                  report_length_map, scaling_map, report_values, unread_counts):
+#         FP_DIV_TEN = 0.1
+#         
+#         while report_index < data_length:
+#             report_id = p[report_index]
+#             required_bytes = report_length_map(report_id, 0)
+#             if required_bytes == 0: break
+#             
+#             scalar, count = scaling_map(report_id)
+#             idx = report_index                        
+#             b2 = p[idx + 2]
+#             accuracy = b2 & 0x03
+#             delay_ms = (((b2 & 0xFC) << 6) | p[idx + 3]) * FP_DIV_TEN                        
+#             r = p[idx + 4] | (p[idx + 5] << 8)
+#             v1 = (r if r < 32768 else r - 65536) * scalar
+#             r = p[idx + 6] | (p[idx + 7] << 8)
+#             v2 = (r if r < 32768 else r - 65536) * scalar
+#             r = p[idx + 8] | (p[idx + 9] << 8)
+#             v3 = (r if r < 32768 else r - 65536) * scalar
+# 
+#             if count == 3:
+#                 sensor_data = (v1, v2, v3)
+#             else:
+#                 r = p[idx + 10] | (p[idx + 11] << 8)
+#                 v4 = (r if r < 32768 else r - 65536) * scalar
+#                 sensor_data = (v1, v2, v3, v4)
+# 
+#             report_values[report_id] = sensor_data + (accuracy, packet_base_ms + delay_ms)
+#             unread_counts[report_id] += 1
+#             report_index += required_bytes
+
 
     def _process_report(self, report_id: int, report_bytes: bytearray) -> None:
         """
