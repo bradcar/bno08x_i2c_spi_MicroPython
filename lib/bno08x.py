@@ -1413,7 +1413,7 @@ class BNO08X:
                             rep_id = value[sub_idx]
                             rep_len = value[sub_idx + 1]
                             outstr += f"DBG::\t\t   Report 0x{rep_id:02X}, Length: {rep_len}\n"
-                           sub_idx += 2
+                            sub_idx += 2
                     else:
                         v = unpack_from(fmt, value, 0)[0]
                         if sub_hdr: v -= 4
