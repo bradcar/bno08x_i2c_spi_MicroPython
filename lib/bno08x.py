@@ -58,18 +58,15 @@ but i2c & spi must also reread header, 1.1739 penalty (27/23) for quaternion
 
 Current best sensor update periods - BNO086 responded with 1 ms update frequeny:
 - spi:   2.0ms (500 Hz) with acc at 2.0ms (500 Hz)
-- uart:  2.2ms (454 Hz) with acc at 2.0ms (500 Hz)
+- uart:  2.0ms (500 Hz) with acc at 2.0ms (500 Hz)
 - i2c:   ?ms (? Hz) with ? ms report frequency
 At report frequencies shorter than above, the period will increase, likey because the host isn't
 keeping up with the sensor and the sensor packages multiple packets together and this library only
 returns data for the latest of each package of reports.
 
-TODO: it seems getting multiple reports per timebase at higher freq. Are interrupts being addressed?
-TODO: Don't reslice payload, just pass _process_report pointers?
-TODO: Convert interrupt flag to counter (if high rates)?
 TODO: reorg method order
 TODO: inline _insert_command_request_report
-TODO: implement continiuation codes for i2c, spi, and uart
+TODO: implement continuation codes for i2c, spi, and uart
 
 Possible future projects:
 FUTURE: Capture all report data in a multi-package report (without overwrite), provide user all results
@@ -78,7 +75,7 @@ FUTURE: include estimated ange in full quaternion implementation, maybe make new
 FUTURE: process two ARVR reports (rotation vector has estimated angle which has a different Q-point)
 """
 
-__version__ = "0.9.7"
+__version__ = "0.9.8"
 __repo__ = "https://github.com/bradcar/bno08x_i2c_spi_MicroPython"
 
 from math import asin, atan2, degrees
@@ -414,9 +411,9 @@ _SENSOR_SCALING = {
     #     BNO_REPORT_POCKET_DETECTOR: (1, 1),  # 0x21)
     #     BNO_REPORT_CIRCLE_DETECTOR: (1, 1),  #0x22)
     #     BNO_REPORT_HEART_RATE_MONITOR: (1, 1),  #0x23
-    BNO_REPORT_ARVR_STABILIZED_ROTATION_VECTOR: (_Q_POINT_14_SCALAR, 5),  # 0x28, note est acc QPoint 12 ?
+    BNO_REPORT_ARVR_STABILIZED_ROTATION_VECTOR: (_Q_POINT_14_SCALAR, 5),  # 0x28, note est acc Q_POINT_12?
     BNO_REPORT_ARVR_STABILIZED_GAME_ROTATION_VECTOR: (_Q_POINT_14_SCALAR, 4),  # 0x29
-    BNO_REPORT_GYRO_INTEGRATED_ROTATION_VECTOR: (_Q_POINT_14_SCALAR, 4),  # #2a
+    BNO_REPORT_GYRO_INTEGRATED_ROTATION_VECTOR: (_Q_POINT_14_SCALAR, 4),  # 2a is angular momentum Q_POINT_10?
     #     BNO_REPORT_MOTION_REQUEST: (1, 1),  # sent to host periodically? 0x2b
     #     BNO_REPORT_OPTICAL_FLOW: (1 ,1),  #  0x2c
     #     BNO_REPORT_DEAD_RECKONING: (1 ,1), #  0x2d
@@ -538,52 +535,52 @@ class SensorFeature2:
 
 class SensorFeature3:
     """ 3-tuple feature manager with methods for enable, reading, and metadata."""
-    __slots__ = ("_bno", "feature_id")
+    __slots__ = ("_bno", "feature_id", "_values", "_count")
 
     def __init__(self, bno_instance, feature_id):
         self._bno = bno_instance
         self.feature_id = feature_id
+        self._values = bno_instance._report_values
+        self._count = bno_instance._unread_report_count
 
     def enable(self, hertz=None):
+        if self.feature_id not in self._values:
+            self._values[self.feature_id] = None
         return self._bno.enable_feature(self.feature_id, hertz)
 
     @property
     def updated(self):
-        return self._bno._unread_report_count[self.feature_id] > 0
+        return self._count[self.feature_id] > 0
 
     @property
     def meta(self):
         """Returns (accuracy, timestamp_ms)."""
-        try:
-            val = self._bno._report_values[self.feature_id]
-            self._bno._unread_report_count[self.feature_id] = 0
-            return val[3], val[4]
-        except KeyError:
-            raise RuntimeError(
-                f"Feature not enabled, use bno.{_REPORTS_DICTIONARY[self.feature_id]}.enable()") from None
+        val = self._values[self.feature_id]
+        if val is None: self._raise_not_enabled()
+        self._count[self.feature_id] = 0
+        return val[3], val[4]
 
     @property
     def full(self):
         """Returns (v1, v2, v3, accuracy, timestamp_ms)."""
-        try:
-            val = self._bno._report_values[self.feature_id]
-            self._bno._unread_report_count[self.feature_id] = 0
-            return val
-        except KeyError:
-            raise RuntimeError(
-                f"Feature not enabled, use bno.{_REPORTS_DICTIONARY[self.feature_id]}.enable()") from None
+        val = self._values[self.feature_id]
+        if val is None: self._raise_not_enabled()
+        self._count[self.feature_id] = 0
+        return val
 
     def __iter__(self):
         """Direct unpacking, ex: x, y, z = bno.acceleration"""
-        try:
-            val = self._bno._report_values[self.feature_id]
-            self._bno._unread_report_count[self.feature_id] = 0
-            yield val[0]
-            yield val[1]
-            yield val[2]
-        except KeyError:
-            raise RuntimeError(
-                f"Feature not enabled, use bno.{_REPORTS_DICTIONARY[self.feature_id]}.enable()") from None
+        val = self._values[self.feature_id]
+        if val is None: self._raise_not_enabled()
+        self._count[self.feature_id] = 0
+        yield val[0]
+        yield val[1]
+        yield val[2]
+
+    def _raise_not_enabled(self):
+        from bno08x import _REPORTS_DICTIONARY
+        report_name = _REPORTS_DICTIONARY.get(self.feature_id, "unknown_sensor")
+        raise RuntimeError(f"Feature not enabled, use bno.{report_name}.enable()")
 
 
 class SensorFeature4:
@@ -593,73 +590,67 @@ class SensorFeature4:
     FUTURE: Explore if estimated angle and how to expose it for advanced users
     bno.geomagnetic_quaternion is really 5-tuple, but few need est angle, so we treat it as 4-tuple
     """
-    __slots__ = ("_bno", "feature_id")
+    __slots__ = ("_bno", "feature_id", "values", "_count")
 
     def __init__(self, bno_instance, feature_id):
         self._bno = bno_instance
         self.feature_id = feature_id
+        self._values = bno_instance._report_values
+        self._count = bno_instance._unread_report_count
 
     def enable(self, hertz=None):
+        if self.feature_id not in self._values:
+            self._values[self.feature_id] = None
         return self._bno.enable_feature(self.feature_id, hertz)
 
     @property
     def updated(self):
-        return self._bno._unread_report_count[self.feature_id] > 0
+        return self._count[self.feature_id] > 0
 
     @property
     def meta(self):
-        try:
-            val = self._bno._report_values[self.feature_id]
-            self._bno._unread_report_count[self.feature_id] = 0
-            return val[4], val[5]
-        except KeyError:
-            raise RuntimeError(
-                f"Feature not enabled, use bno.{_REPORTS_DICTIONARY[self.feature_id]}.enable()") from None
+        val = self._values[self.feature_id]
+        if val is None: self._raise_not_enabled()
+        self._count[self.feature_id] = 0
+        return val[4], val[5]
 
     @property
     def full(self):
         """Returns (v1, v2, v3, real, accuracy, timestamp_ms)."""
-        try:
-            val = self._bno._report_values[self.feature_id]
-            self._bno._unread_report_count[self.feature_id] = 0
-            return val
-        except KeyError:
-            raise RuntimeError(
-                f"Feature not enabled, use bno.{_REPORTS_DICTIONARY[self.feature_id]}.enable()") from None
+        val = self._values[self.feature_id]
+        if val is None: self._raise_not_enabled()
+        self._count[self.feature_id] = 0
+        return val
 
     @property
     def euler(self):
         """Returns converted Euler 3-tuple plus  accuracy and timestamp_ms."""
-        try:
-            val = self._bno._report_values[self.feature_id]
-            self._bno._unread_report_count[self.feature_id] = 0
-            return euler_conversion(val[0], val[1], val[2], val[3])
-        except KeyError:
-            raise RuntimeError(
-                f"Feature not enabled, use bno.{_REPORTS_DICTIONARY[self.feature_id]}.enable()") from None
+        val = self._values[self.feature_id]
+        if val is None: self._raise_not_enabled()
+        self._count[self.feature_id] = 0
+        return euler_conversion(val[0], val[1], val[2], val[3])
 
     @property
     def euler_full(self):
         """Returns converted Euler 3-tuple plus  accuracy and timestamp_ms."""
-        try:
-            data = self._bno._report_values[self.feature_id]
-            self._bno._unread_report_count[self.feature_id] = 0
-            return euler_conversion(data[0], data[1], data[2], data[3]) + (data[4], data[5])
-        except KeyError:
-            raise RuntimeError(
-                f"Feature not enabled, use bno.{_REPORTS_DICTIONARY[self.feature_id]}.enable()") from None
+        data = self._values[self.feature_id]
+        if data is None: self._raise_not_enabled()
+        self._count[self.feature_id] = 0
+        return euler_conversion(data[0], data[1], data[2], data[3]) + (data[4], data[5])
 
     def __iter__(self):
-        try:
-            val = self._bno._report_values[self.feature_id]
-            self._bno._unread_report_count[self.feature_id] = 0
-            yield val[0]
-            yield val[1]
-            yield val[2]
-            yield val[3]
-        except KeyError:
-            raise RuntimeError(
-                f"Feature not enabled, use bno.{_REPORTS_DICTIONARY[self.feature_id]}.enable()") from None
+        val = self._values[self.feature_id]
+        if val is None: self._raise_not_enabled()
+        self._count[self.feature_id] = 0
+        yield val[0]
+        yield val[1]
+        yield val[2]
+        yield val[3]
+
+    def _raise_not_enabled(self):
+        from bno08x import _REPORTS_DICTIONARY
+        report_name = _REPORTS_DICTIONARY.get(self.feature_id, "unknown_sensor")
+        raise RuntimeError(f"Feature not enabled, use bno.{report_name}.enable()")
 
     # class SensorReading5:
     """
@@ -747,10 +738,9 @@ class BNO08X:
         self._product_id_received = False
         self._reset_mismatch = False  # if reset_pin set make sure hardware reset done, else pin bad
 
-        self._report_periods_dictionary_us = {}
-
         self._features = {}  # Create feature objects once
-        self._report_values = {}  # most recent sensor values, only if enabled
+        self._report_periods_dictionary_us = {}
+        self._report_values = [None] * 45  # Stores most recent sensor values, only if enabled
         self._unread_report_count = bytearray(45)  # array, reports received but read by user, 1:45, (0x01 to 0x2d)
 
         self.reset_sensor()
@@ -770,10 +760,9 @@ class BNO08X:
         self.last_interrupt_us = ticks_us()
         self.ms_at_interrupt = ticks_ms()
         self._new_data_interrupt = True
-        # set epoch start ms on first interrupt
-        self._epoch_start_ms = ticks_ms()
-        # Rebind the IRQ to the fast interrupt handler
-        pin.irq(handler=self._fast_interrupt)
+        self._epoch_start_ms = ticks_ms()  # set epoch start ms on first interrupt
+        pin.irq(
+            handler=self._fast_interrupt)  # initial Hander, after first interrupt Rebind to the fast interrupt handler
 
     def _fast_interrupt(self, pin):
         """int_pin Interrupt handler for active-low (H_INTN). Other handler _first_interrupt captures host & bno time"""
@@ -797,7 +786,7 @@ class BNO08X:
         self._dbg("Wait for Advertisement after reset and Reset Complete")
         sync_start = ticks_ms()
         while not self._advertisement_received and ticks_diff(ticks_ms(), sync_start) < 500:
-            if self._parse_packets() > 0:
+            if self.update_sensors() > 0:
                 sync_start = ticks_ms()
             sleep_ms(10)
 
@@ -813,7 +802,7 @@ class BNO08X:
         start = ticks_ms()
         while not self._product_id_received and ticks_diff(ticks_ms(), start) < 3000:
             if self._new_data_interrupt:
-                self._parse_packets()
+                self.update_sensors()
 
         if self._product_id_received and not self._reset_mismatch:
             self._dbg(f"*** {reset_type} reset success, acknowledged with first Product ID 0xF8\n")
@@ -867,115 +856,167 @@ class BNO08X:
 
     ############ USER VISIBLE REPORT FUNCTIONS ###########################
 
-    def update_sensors(self):
-        return self._parse_packets()
+    @micropython.native
+    def update_sensors(self) -> int:
+        """
+        Reads new packet then Parse packets into multiple reports. Process based on channel
+                channel 3: Timebase, rebase and Sensors, added fastpath for timebase followed by sensor reports 
+                Channel 2: Command reports (Multiple single reports, ex: F1,F8's)
+                Channel 1: Executable (single reports, TODO verify)
+                Channel 0: SHTP command (single reports, TODO verify)
+                Channel 5: High-speed Gyro (single reports) - Raises UNIMPLEMENTED
+        """
+        FP_TO_MS = 0.001
+        FP_DIV_TEN = 0.1
+        SIGN_BIT = 32768
+        processed_count = 0
+        report_length_map = _REPORT_LENGTHS.get
+        scaling_map = _SENSOR_SCALING.get
+        report_values = self._report_values
+        unread_report_count = self._unread_report_count
 
-    # todo: remove seems 1 every >700 packets sees 2 packets
-    #         num = self._parse_packets()
-    #         if num > 1:
-    #             print(f" Number packets >1, {num} packets")
-    #         return num
+        while self._new_data_interrupt or (hasattr(self, "_uart") and self._uart.any() >= 4):
+            self._new_data_interrupt = False
+            result = self._read_packet(wait=True)
+            if result is None:
+                break
+            payload, channel, data_length = result
+            p_mv = memoryview(payload)
+            processed_count += 1
+            report_index = 0
+            report_id = p_mv[0]
+
+            # fast path for timestamp & reports in a single packet, inlined from self._process_report
+            if channel == 3 and report_id == _BASE_TIMESTAMP:
+                self._last_base_timestamp_us = (p_mv[1] | (p_mv[2] << 8) | (p_mv[3] << 16) | (p_mv[4] << 24)) * 100
+                packet_base_ms = ticks_diff(self.ms_at_interrupt, self._epoch_start_ms) - (
+                        self._last_base_timestamp_us * FP_TO_MS)
+                report_index += 5  # _BASE_TIMESTAMP is 5 bytes
+
+                # native-compiled fast path - test showed it was slower?
+                # self._sensor_fast_path(p_mv, data_length, 5, packet_base_ms, report_length_map, scaling_map, report_values, unread_counts)
+                p = p_mv
+                while report_index < data_length:
+                    report_id = p[report_index]
+                    required_bytes = report_length_map(report_id, 0)
+                    if required_bytes == 0: break
+                    scalar, count = scaling_map(report_id, (0, 0))
+
+                    idx = report_index
+                    b2 = p[idx + 2]
+                    # accuracy = b2 & 0x03
+                    ts = packet_base_ms + (((b2 & 0xFC) << 6) | p[idx + 3]) * FP_DIV_TEN
+                    r = p[idx + 4] | (p[idx + 5] << 8)
+                    v1 = (r - ((r & SIGN_BIT) << 1)) * scalar
+                    r = p[idx + 6] | (p[idx + 7] << 8)
+                    v2 = (r - ((r & SIGN_BIT) << 1)) * scalar
+                    r = p[idx + 8] | (p[idx + 9] << 8)
+                    v3 = (r - ((r & SIGN_BIT) << 1)) * scalar
+
+                    if count == 3:
+                        report_values[report_id] = (v1, v2, v3, b2 & 0x03, ts)
+                    else:  # Handle Quaternion V4
+                        r = p[idx + 10] | (p[idx + 11] << 8)
+                        v4 = (r - ((r & SIGN_BIT) << 1)) * scalar
+                        report_values[report_id] = (v1, v2, v3, v4, b2 & 0x03, ts)
+
+                    unread_report_count[report_id] += 1
+                    report_index += required_bytes
+                continue
+
+            # Split payload into multiple reports and process
+            if channel == 3 or channel == 2:
+                while report_index < data_length:
+                    report_id = p_mv[report_index]
+                    required_bytes = report_length_map(report_id, 0)
+
+                    if required_bytes == 0:
+                        self._dbg(f"UNSUPPORTED Report ID {hex(report_id)} - SKIPPING ONE BYTE")
+                        report_index += 1
+                        continue
+
+                    if data_length - report_index < required_bytes:
+                        self._dbg(f"UNSUPPORTED truncated packet ERROR: {data_length - report_index} bytes")
+                        break
+
+                    self._process_report(report_id, p_mv[report_index: report_index + required_bytes])
+                    report_index += required_bytes
+
+            elif channel == 0:  # all reports on channel 5 are single report packets
+                self._process_control_report(0x00, p_mv)
+
+            elif channel == 1:  # all reports on channel 5 are single report packets
+                self._process_control_report(p_mv[0], p_mv)
+
+            elif channel == 5:  # gyro rotation vector reports on channel 5 are single report packets
+                raise NotImplementedError(f"gyro rotation vector ({hex(report_id)}) is not supported yet.")
+
+        return processed_count
 
     # 3-Tuple Sensor Reports + accuracy + timestamp
     @property
     def linear_acceleration(self):
         """Current linear acceleration values on the X, Y, and Z axes in meters per second squared"""
-        report_id = BNO_REPORT_LINEAR_ACCELERATION
-        if report_id not in self._features:  # If object not found, create and cache it
-            self._features[report_id] = SensorFeature3(self, report_id)
-        return self._features[report_id]
+        return self._get_feature(BNO_REPORT_LINEAR_ACCELERATION, SensorFeature3)
 
     @property
     def acceleration(self):
-        report_id = BNO_REPORT_ACCELEROMETER
-        if report_id not in self._features:  # If object not found, create and cache it
-            self._features[report_id] = SensorFeature3(self, report_id)
-        return self._features[report_id]
+        return self._get_feature(BNO_REPORT_ACCELEROMETER, SensorFeature3)
 
     @property
     def gravity(self):
         """gravity vector in the X, Y, and Z components axes in meters per second squared"""
-        report_id = BNO_REPORT_GRAVITY
-        if report_id not in self._features:  # If object not found, create and cache it
-            self._features[report_id] = SensorFeature3(self, report_id)
-        return self._features[report_id]
+        return self._get_feature(BNO_REPORT_GRAVITY, SensorFeature3)
 
     @property
     def gyro(self):
         """Gyro's rotation measurements on the X, Y, and Z axes in radians per second"""
-        report_id = BNO_REPORT_GYROSCOPE
-        if report_id not in self._features:  # If object not found, create and cache it
-            self._features[report_id] = SensorFeature3(self, report_id)
-        return self._features[report_id]
+        return self._get_feature(BNO_REPORT_GYROSCOPE, SensorFeature3)
 
     @property
     def magnetic(self):
         """current magnetic field measurements on the X, Y, and Z axes"""
-        report_id = BNO_REPORT_MAGNETOMETER
-        if report_id not in self._features:  # If object not found, create and cache it
-            self._features[report_id] = SensorFeature3(self, report_id)
-        return self._features[report_id]
+        return self._get_feature(BNO_REPORT_MAGNETOMETER, SensorFeature3)
 
     # 4-Tuple Sensor Reports + accuracy + timestamp
     @property
     def quaternion(self):
         """A quaternion representing the current rotation vector"""
-        report_id = BNO_REPORT_ROTATION_VECTOR
-        if report_id not in self._features:  # If object not found, create and cache it
-            self._features[report_id] = SensorFeature4(self, report_id)
-        return self._features[report_id]
+        return self._get_feature(BNO_REPORT_ROTATION_VECTOR, SensorFeature4)
 
     @property
     def geomagnetic_quaternion(self):
         """A quaternion representing the current geomagnetic rotation vector"""
-        report_id = BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR
-        if report_id not in self._features:  # If object not found, create and cache it
-            self._features[report_id] = SensorFeature4(self, report_id)
-        return self._features[report_id]
+        return self._get_feature(BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR, SensorFeature4)
 
     @property
     def game_quaternion(self):
         """A quaternion representing the current rotation vector with no specific reference for heading,
         while roll and pitch are referenced against gravity. To prevent sudden jumps in heading due to corrections,
         the `game_quaternion` property is not corrected using the magnetometer. Drift is expected ! """
-        report_id = BNO_REPORT_GAME_ROTATION_VECTOR
-        if report_id not in self._features:  # If object not found, create and cache it
-            self._features[report_id] = SensorFeature4(self, report_id)
-        return self._features[report_id]
+        return self._get_feature(BNO_REPORT_GAME_ROTATION_VECTOR, SensorFeature4)
 
     # raw reports to not support .full
     @property
     def raw_acceleration(self):
         """raw acceleration from registers 3 data value and a raw timestamp"""
-        report_id = BNO_REPORT_RAW_ACCELEROMETER
-        if report_id not in self._features:  # If object not found, create and cache it
-            self._features[report_id] = RawSensorFeature(self, report_id, data_count=4)
-        return self._features[report_id]
+        return self._get_feature(BNO_REPORT_RAW_ACCELEROMETER, RawSensorFeature, 4)
 
     @property
     def raw_gyro(self):
         """ raw gyroscope from registers 3 data value, only sensor that reports Celsius, and a raw timestamp"""
-        report_id = BNO_REPORT_RAW_GYROSCOPE
-        if report_id not in self._features:  # If object not found, create and cache it
-            self._features[report_id] = RawSensorFeature(self, report_id, data_count=5)
-        return self._features[report_id]
+        return self._get_feature(BNO_REPORT_RAW_GYROSCOPE, RawSensorFeature, 5)
 
     @property
     def raw_magnetic(self):
         """ raw magnetic from registers 3 data value and a raw timestamp"""
-        report_id = BNO_REPORT_RAW_MAGNETOMETER
-        if report_id not in self._features:  # If object not found, create and cache it
-            self._features[report_id] = RawSensorFeature(self, report_id, data_count=4)
-        return self._features[report_id]
+        return self._get_feature(BNO_REPORT_RAW_MAGNETOMETER, RawSensorFeature, 4)
 
     # Other Sensor Reports
     @property
     def steps(self):
         """ The number of steps detected since the sensor was initialized"""
-        report_id = BNO_REPORT_STEP_COUNTER
-        if report_id not in self._features:  # If object not found, create and cache it
-            self._features[report_id] = SensorFeature1(self, report_id)
-        return self._features[report_id]
+        return self._get_feature(BNO_REPORT_STEP_COUNTER, SensorFeature1)
 
     @property
     def stability_classifier(self):
@@ -986,20 +1027,14 @@ class BNO08X:
         * "Stable" - met the stable threshold and duration requirements.
         * "In motion" - sensor is moving.
         """
-        report_id = BNO_REPORT_STABILITY_CLASSIFIER
-        if report_id not in self._features:  # If object not found, create and cache it
-            self._features[report_id] = SensorFeature1(self, report_id)
-        return self._features[report_id]
+        return self._get_feature(BNO_REPORT_STABILITY_CLASSIFIER, SensorFeature1)
 
     @property
     def activity_classifier(self):
         """Returns the sensor's assessment of the activity:
         * "Unknown", "In-Vehicle", "On-Bicycle", "On-Foot", "Still" "Tilting", "Walking", "Running", "On Stairs"
         """
-        report_id = BNO_REPORT_ACTIVITY_CLASSIFIER
-        if report_id not in self._features:  # If object not found, create and cache it
-            self._features[report_id] = SensorFeature2(self, report_id)
-        return self._features[report_id]
+        return self._get_feature(BNO_REPORT_ACTIVITY_CLASSIFIER, SensorFeature2)
 
     # =============  User helper functions  =============
     def bno_start_diff(self, ticks: int) -> int:
@@ -1008,23 +1043,17 @@ class BNO08X:
 
     @staticmethod
     def euler_conversion(i, j, k, r):
-        """
-        Converts quaternion values to Euler angles to degrees.
-        Uses common aerospace/robotics convention (XYZ rotation order: roll-pitch-yaw).
-        """
+        """Converts quaternion to Euler angles(degrees). Aerospace/robotics convention (XYZ order: roll-pitch-yaw)"""
         jsqr = j * j
         t0 = 2.0 * (r * i + j * k)
         t1 = 1.0 - 2.0 * (i * i + jsqr)
         roll = degrees(atan2(t0, t1))
-
         t2 = 2.0 * (r * j - k * i)
         t2 = max(-1.0, min(1.0, t2))
         pitch = degrees(asin(t2))
-
         t3 = 2.0 * (r * k + i * j)
         t4 = 1.0 - 2.0 * (jsqr + k * k)
         yaw = degrees(atan2(t3, t4))
-
         return roll, pitch, yaw
 
     @staticmethod
@@ -1077,7 +1106,6 @@ class BNO08X:
         qj = int(j * (1 << 14))
         qk = int(k * (1 << 14))
         qr = int(r * (1 << 14))
-
         payload = pack("<hhhh", qi, qj, qk, qr)
         self._dbg(f"TARE: q_int = {(qi, qj, qk, qr)}")
         params = [_ME_TARE_SET_REORIENTATION] + list(payload)
@@ -1173,136 +1201,11 @@ class BNO08X:
 
     # ############### private Core Engine methods ###############
 
-    def _parse_packets(self) -> int:
-        """
-        Parse packets into multiple reports, this must be efficient
-        
-        TODO: process based on channel likely should always expect multiple reports per packet
-                channel 3: Timebase, rebase and Sensors (Sensors always follow timebase?)
-                Channel 5: High-speed Gyro (single reports)
-                Channel 2: Command reports (Multiple single reports, ex: F1,F8's)
-                Channel 1: Executable (single reports)
-                Channel 0: SHTP command (single reports)
-        """
-        FP_TO_MS = 0.001
-        FP_DIV_TEN = 0.1
-        SIGN_BIT = 32768
-        processed_count = 0
-        report_length_map = _REPORT_LENGTHS.get
-        scaling_map = _SENSOR_SCALING.get
-        report_values = self._report_values
-        unread_report_count = self._unread_report_count
-
-        while self._new_data_interrupt or (hasattr(self, "_uart") and self._uart.any() >= 4):
-            self._new_data_interrupt = False
-
-            result = self._read_packet(wait=False)
-            if result is None:
-                break
-            payload, channel, data_length = result
-            p_mv = memoryview(payload)
-            processed_count += 1
-            report_index = 0
-            report_id = p_mv[0]
-
-            # fast path for timestamp & reports in a single packet, inlined from self._process_report
-            if channel == 3 and report_id == _BASE_TIMESTAMP:
-                self._last_base_timestamp_us = (p_mv[1] | (p_mv[2] << 8) | (p_mv[3] << 16) | (p_mv[4] << 24)) * 100
-                packet_base_ms = ticks_diff(self.ms_at_interrupt, self._epoch_start_ms) - (
-                            self._last_base_timestamp_us * FP_TO_MS)
-                report_index += 5  # _BASE_TIMESTAMP is 5 bytes
-
-                # native compiled fast pah - test showed it was slower?
-                # self._sensor_fast_path(p_mv, data_length, 5, packet_base_ms, report_length_map, scaling_map, 
-                #                              report_values, unread_counts)
-                p = p_mv
-                while report_index < data_length:
-                    report_id = p[report_index]
-                    required_bytes = report_length_map(report_id, 0)
-                    if required_bytes == 0: break
-                    scalar, count = scaling_map(report_id, (0, 0))
-
-                    idx = report_index
-                    b2 = p[idx + 2]
-                    #accuracy = b2 & 0x03
-                    ts = packet_base_ms + (((b2 & 0xFC) << 6) | p[idx + 3]) * FP_DIV_TEN
-                    r = p[idx + 4] | (p[idx + 5] << 8)
-                    v1 = (r - ((r & SIGN_BIT) << 1)) * scalar
-                    r = p[idx + 6] | (p[idx + 7] << 8)
-                    v2 = (r - ((r & SIGN_BIT) << 1)) * scalar
-                    r = p[idx + 8] | (p[idx + 9] << 8)
-                    v3 = (r - ((r & SIGN_BIT) << 1)) * scalar
-
-                    if count == 3:
-                        report_values[report_id] = (v1, v2, v3, b2 & 0x03, ts)
-                    else:  # Handle Quaternion V4
-                        r = p[idx + 10] | (p[idx + 11] << 8)
-                        v4 = (r - ((r & SIGN_BIT) << 1)) * scalar
-                        report_values[report_id] = (v1, v2, v3, v4, b2 & 0x03, ts)
-                    
-                    unread_report_count[report_id] += 1
-                    report_index += required_bytes
-                continue
-
-            # Split payload into multiple reports and process
-            if channel == 3 or channel == 2 or channel == 5:
-                while report_index < data_length:
-                    report_id = p_mv[report_index]
-                    required_bytes = report_length_map(report_id, 0)
-
-                    if required_bytes == 0:
-                        self._dbg(f"UNSUPPORTED Report ID {hex(report_id)} - SKIPPING ONE BYTE")
-                        report_index += 1
-                        continue
-
-                    if data_length - report_index < required_bytes:
-                        self._dbg(f"UNSUPPORTED truncated packet ERROR: {data_length - report_index} bytes")
-                        break
-
-                    self._process_report(report_id, p_mv[report_index: report_index + required_bytes])
-                    report_index += required_bytes
-
-            elif channel == 0:  # all reports on channel 0 are single reports
-                self._process_control_report(0x00, p_mv)
-
-            elif channel == 1:  # all reports on channel 1 are single reports
-                self._process_control_report(p_mv[0], p_mv)
-
-        return processed_count
-    
-#     @micropython.native
-#     def _sensor_fast_path(self, p, data_length, report_index, packet_base_ms, 
-#                                  report_length_map, scaling_map, report_values, unread_counts):
-#         FP_DIV_TEN = 0.1
-#         
-#         while report_index < data_length:
-#             report_id = p[report_index]
-#             required_bytes = report_length_map(report_id, 0)
-#             if required_bytes == 0: break
-#             
-#             scalar, count = scaling_map(report_id)
-#             idx = report_index                        
-#             b2 = p[idx + 2]
-#             accuracy = b2 & 0x03
-#             delay_ms = (((b2 & 0xFC) << 6) | p[idx + 3]) * FP_DIV_TEN                        
-#             r = p[idx + 4] | (p[idx + 5] << 8)
-#             v1 = (r if r < 32768 else r - 65536) * scalar
-#             r = p[idx + 6] | (p[idx + 7] << 8)
-#             v2 = (r if r < 32768 else r - 65536) * scalar
-#             r = p[idx + 8] | (p[idx + 9] << 8)
-#             v3 = (r if r < 32768 else r - 65536) * scalar
-# 
-#             if count == 3:
-#                 sensor_data = (v1, v2, v3)
-#             else:
-#                 r = p[idx + 10] | (p[idx + 11] << 8)
-#                 v4 = (r if r < 32768 else r - 65536) * scalar
-#                 sensor_data = (v1, v2, v3, v4)
-# 
-#             report_values[report_id] = sensor_data + (accuracy, packet_base_ms + delay_ms)
-#             unread_counts[report_id] += 1
-#             report_index += required_bytes
-
+    def _get_feature(self, report_id, cls, *args):
+        feat = self._features.get(report_id)
+        if feat is None:
+            feat = self._features[report_id] = cls(self, report_id, *args)
+        return feat
 
     def _process_report(self, report_id: int, report_bytes: bytearray) -> None:
         """
@@ -1311,14 +1214,12 @@ class BNO08X:
         Multiple reports are processed in the order they appear in the packet buffer.
         Last sensor report's value over-write previous in this packet, ex: self._report_values[report_id],
 
-        will also check for and process all control reports, catch all if processing sensor reports
         Must call self._process_control_report directly if reports coming from channel 0 or 1, because
         they have two prolematic report ids (0x00, and 0x01 which is same as acceleration below).
 
         Timestamps are msec since first sensor interrupt in float(FP) with 0.1ms resolution.
-        Host synched int or FP32 have problems such as overflow, wrap to quickly, or lack precision. FP32 only has
-        6-7 significant digits
-        Used to use problematic: self._sensor_ms = self.last_interrupt_ms - self._last_base_timestamp_us + delay_ms
+        Host synched int or FP32 issues: overflow, wrap to quickly, or lack precision. FP32 has 6-7 significant digits
+        Can't use problematic: self._sensor_ms = self.last_interrupt_ms - self._last_base_timestamp_us + delay_ms
         """
         # process typical sensor reports first
         if 0x01 <= report_id <= 0x09:
@@ -1350,16 +1251,14 @@ class BNO08X:
 
         # Base Timestamp (0xfb)
         if report_id == _BASE_TIMESTAMP:
-            self._last_base_timestamp_us = (
-                                                   report_bytes[1] | (report_bytes[2] << 8) | (
-                                                   report_bytes[3] << 16) | (report_bytes[4] << 24)) * 100
+            self._last_base_timestamp_us = (report_bytes[1] | (report_bytes[2] << 8) | (
+                    report_bytes[3] << 16) | (report_bytes[4] << 24)) * 100
             return
 
         # Timestamp Rebase (0xfa), this sent when _BASE_TIMESTAMP wraps
         if report_id == _TIMESTAMP_REBASE:
-            self._last_base_timestamp_us = (
-                                                   report_bytes[1] | (report_bytes[2] << 8) | (
-                                                   report_bytes[3] << 16) | (report_bytes[4] << 24)) * 100
+            self._last_base_timestamp_us = (report_bytes[1] | (report_bytes[2] << 8) | (
+                    report_bytes[3] << 16) | (report_bytes[4] << 24)) * 100
             return
 
         #  **** Process all control reports, catchall if processing sensor reports
@@ -1420,16 +1319,14 @@ class BNO08X:
         """ Process control reports. These are only on Channel 0, 1, or 2 """
         # Base Timestamp (0xfb)
         if report_id == _BASE_TIMESTAMP:
-            self._last_base_timestamp_us = (
-                                                   report_bytes[1] | (report_bytes[2] << 8) | (
-                                                   report_bytes[3] << 16) | (report_bytes[4] << 24)) * 100
+            self._last_base_timestamp_us = (report_bytes[1] | (report_bytes[2] << 8) | (
+                    report_bytes[3] << 16) | (report_bytes[4] << 24)) * 100
             return
 
         # Timestamp Rebase (0xfa), this sent when _BASE_TIMESTAMP wraps
         if report_id == _TIMESTAMP_REBASE:
-            self._last_base_timestamp_us = (
-                                                   report_bytes[1] | (report_bytes[2] << 8) | (
-                                                   report_bytes[3] << 16) | (report_bytes[4] << 24)) * 100
+            self._last_base_timestamp_us = (report_bytes[1] | (report_bytes[2] << 8) | (
+                    report_bytes[3] << 16) | (report_bytes[4] << 24)) * 100
             return
 
         # Feature response (0xfc) - This report issued when feature is enabled or updated
@@ -1476,22 +1373,13 @@ class BNO08X:
             self._product_id_received = True
             return
 
-        # first wake advertisement (280 byte payload) or after command for advertisement (51 byte payload)
-        # Advertisement encoded with TLV (Type-Length-Value)
+        # Advertisement TLV encoded (Type-Length-Value), wake advertisement 280 byte payload, 2nd is 51 bytes
         if report_id == _ADVERTISE_REPORT:
             self._dbg("Advertisement response on Channel 0x00")
             length = len(report_bytes)
 
-            outstr = ""
-            # outstr = f"\nDBG::\t\t Data Len: {length}"
-            # for idx, packet_byte in enumerate(report_bytes):
-            #     if (idx % 4) == 0:
-            #         outstr += f"\nDBG::\t\t[0x{idx:02X}] "
-            #     outstr += f"0x{packet_byte:02X} "
-            # outstr += "\n\t\t*******************************"
-
             if length > 2:
-                outstr += "\n\t\t Advertisement TLV Decode:\n"
+                outstr = "\n\t\t Advertisement TLV Decode:\n"
             else:
                 outstr = f"\nDBG::\t\t Data Len: {length}"
                 for idx, packet_byte in enumerate(report_bytes):
@@ -1514,21 +1402,18 @@ class BNO08X:
 
                 if tag in _tag_dictionary:
                     name, fmt, sub_hdr = _tag_dictionary[tag]
-
                     if fmt == 'S':
                         decoded_str = bytes(value).decode('utf-8', 'ignore').strip('\x00')
                         s = "" if tag == 0 else f": {decoded_str}"
                         outstr += f"DBG::\t\t {name}{s}\n"
-                    # report and length of each report, already statically defined
                     elif fmt == 'R':
-                        outstr += "DBG::\t\t *NOTE* Did not decode Report ID and lengths in Advertisement\n"
-                        # outstr += f"DBG::\t\t {name} (Report List):\n"
-                        # sub_idx = 0
-                        # while sub_idx < len(value):
-                        #     rep_id = value[sub_idx]
-                        #     rep_len = value[sub_idx + 1]
-                        #     outstr += f"DBG::\t\t   Report 0x{rep_id:02X}, Length: {rep_len}\n"
-                        #    sub_idx += 2
+                        outstr += f"DBG::\t\t {name} (Report List & Lengths):\n"
+                        sub_idx = 0
+                        while sub_idx < len(value):
+                            rep_id = value[sub_idx]
+                            rep_len = value[sub_idx + 1]
+                            outstr += f"DBG::\t\t   Report 0x{rep_id:02X}, Length: {rep_len}\n"
+                           sub_idx += 2
                     else:
                         v = unpack_from(fmt, value, 0)[0]
                         if sub_hdr: v -= 4
@@ -1575,7 +1460,7 @@ class BNO08X:
         Called recursively because raw reports require non-raw reports to be enabled
         On Channel (0x02), send _SET_FEATURE_COMMAND (0xfb) with feature id and requested period
         On Channel (0x02), await GET_FEATURE_RESPONSE (0xfc) with actual eabled period
-        :returns frequency (float) actual frequency the sensor will attempt to use
+        :returns: frequency (float) actual frequency the sensor will attempt to use
         """
         self._dbg(f"Send SET_FEATURE_COMMAND (0xfd) to enable FEATURE ID: {hex(feature_id)}")
         feature_enable_request = bytearray(17)
@@ -1614,7 +1499,7 @@ class BNO08X:
         timeout_ms = _FEATURE_ENABLE_TIMEOUT * 1000
 
         while feature_id not in self._report_periods_dictionary_us:
-            self._parse_packets()
+            self.update_sensors()
 
             if ticks_diff(ticks_ms(), start_time) > timeout_ms:
                 raise RuntimeError(f"BNO08X: Timeout enabling feature: {hex(feature_id)}")
@@ -1640,9 +1525,7 @@ class BNO08X:
 
     def _hard_reset(self) -> None:
         """Hardware reset the sensor to an initial unconfigured state"""
-        if not self._reset_pin:
-            return
-
+        if not self._reset_pin: return
         self._dbg("Hard Reset starting...")
         self._reset_pin.value(1)
         sleep_ms(10)

@@ -13,7 +13,7 @@ from struct import pack
 import uctypes
 from machine import Pin
 from micropython import const
-from utime import ticks_ms, ticks_diff, sleep_us
+from utime import ticks_us, ticks_ms, ticks_diff, sleep_us
 
 from bno08x import BNO08X
 
@@ -72,8 +72,8 @@ class BNO08X_I2C(BNO08X):
             raise RuntimeError("int_pin is required for I2C operation")
         if not isinstance(int_pin, Pin):
             raise TypeError(f"int_pin must be a Pin object, not {type(int_pin)}.")
-        self._int = int_pin
-        self._int.init(Pin.IN, Pin.PULL_UP)  # guarantee int_pin is properly set up
+        self._int_pin = int_pin
+        self._int_pin.init(Pin.IN, Pin.PULL_UP)  # guarantee int_pin is properly set up
 
         if reset_pin is not None and not isinstance(reset_pin, Pin):
             raise TypeError(f"Reset (RST) pin must be a Pin object or None, not {type(reset_pin)}")
@@ -89,29 +89,16 @@ class BNO08X_I2C(BNO08X):
         """I2C has no wake signal, when called in the base class this is a noop"""
         pass
 
-    def _wait_for_int(self):
-        """
-        Waits for int_pin to assert (go low) by monitoring microsecond timestamp set by the Interrupt.
-        """
-        initial_int_time = self.last_interrupt_us
-        start_time = ticks_ms()
-
-        # Check if the interrupt is already active (was missed)
+    @micropython.native
+    def _wait_for_int(self, timeout_us=1000):
         if self._int_pin.value() == 0:
-            # * comment out self._dbg for normal operation, adds delay even with debug=False
-            # self._dbg("int_piun is active low (0) on entry.")
-            return
+            return True
 
-            # Poll the interrupt timestamp for a change
-        while ticks_diff(ticks_ms(), start_time) < 10:
-            if self.last_interrupt_us != initial_int_time:
-                return
-            sleep_us(10)
-            
-        if self._int.value() == 0:
-            return
-
-        raise RuntimeError(f"_wait_for_int timeout ({ticks_diff(ticks_ms(), start_time)}ms) waiting for int_pin")
+        start = ticks_us()
+        while self._int_pin.value() != 0:
+            if ticks_diff(ticks_us(), start) > timeout_us:
+                return False 
+        return True
 
     def _send_packet(self, channel, data):
         seq = self._tx_sequence_number[channel]
@@ -127,31 +114,30 @@ class BNO08X_I2C(BNO08X):
         self._tx_sequence_number[channel] = (seq + 1) & 0xFF
         return self._tx_sequence_number[channel]
 
-    def _read_packet(self, wait=None):
-        wait = bool(wait)  # both wait=None wait=False are non-blocking        
-        # In I2C, data is ready if the INT pin is low OR if the user requested to wait.
-        if not wait and self._int.value() != 0:
-            return None
-
-        if wait or self._int.value() == 0:
-            if self._int.value() != 0:
-                self._wait_for_int()  # Will raise a timeout if no new interrupt after 10ms
+    @micropython.native
+    def _read_packet(self, wait=False):
+        if self._int_pin.value() != 0:
+            if not wait:
+                return None
+            if not self._wait_for_int(timeout_us=50000):
+                return None
+            
+        # Local references to avoid repeated attribute lookups
+        i2c = self._i2c
+        i2c_addr = self._bno_i2c_addr
+        h_mv = self._header_mv
+        h = self._header
 
         # Read 4-byte SHTP header and process
-        self._i2c.readfrom_into(self._bno_i2c_addr, self._header_mv)
+        i2c.readfrom_into(i2c_addr, h_mv)
 
-        h = self._header
-        raw_packet_bytes = h[0] | (h[1] << 8)
+        raw_packet_bytes = (h[1] << 8) | h[0]
         if raw_packet_bytes == 0:  # fast return if 0 payload
             # self._dbg("_read_packet: packet_bytes=0, returning None.")
             return None # NOTE: not a tuple! must check for None first, then unpack return
-        channel = h[2]
-        seq = h[3]
-        
-        self._rx_sequence_number[channel] = seq  # SH2 Sequence number
 
-        if raw_packet_bytes == 0xFFFF:  # bad sensor         
-            raise OSError(f"FATAL BNO08X Error: Invalid SHTP header(0xFFFF), sensor corrupted?")
+        # if raw_packet_bytes == 0xFFFF:  # bad sensor         
+        #     raise OSError(f"FATAL BNO08X Error: Invalid SHTP header(0xFFFF), sensor corrupted?")
 
         packet_bytes = raw_packet_bytes & 0x7FFF
         payload_bytes = packet_bytes - 4
@@ -161,7 +147,7 @@ class BNO08X_I2C(BNO08X):
 
         if packet_bytes <= _SHTP_MAX_CARGO_PACKET_BYTES:
             header_payload_mv = memoryview(self._data_buffer)[:packet_bytes]
-            self._i2c.readfrom_into(self._bno_i2c_addr, header_payload_mv, packet_bytes)
+            i2c.readfrom_into(i2c_addr, header_payload_mv, packet_bytes)
             mv = header_payload_mv[4:]
         else:
             print(f"FRAGMENTED PACKET - {packet_bytes=} and {_SHTP_MAX_CARGO_PACKET_BYTES=}")
@@ -179,10 +165,12 @@ class BNO08X_I2C(BNO08X):
                 self._dbg(f"CONTINUATION in _read_packet: {packet_bytes=}")
                 # raise PacketError("read partial packet")
 
+        channel = h[2]
+        seq = h[3]
         self._rx_sequence_number[channel] = seq  # report sequence number
 
-        # * comment out self._dbg for normal operation, adds 105ms delay even with debug=False
-        self._dbg(f" Received Packet *************{self._packet_decode(payload_bytes + 4, channel, seq, mv)}")
+        # * comment out self._dbg for normal operation, adds 105ms delay even with debug=False, if self._debug also helps
+        #if self._debug: self._dbg(f" Received Packet *************{self._packet_decode(payload_bytes + 4, channel, seq, mv)}")
 
         # return packet's payload and channel, payload_length can be derived len(payload)
         return mv, channel, payload_bytes

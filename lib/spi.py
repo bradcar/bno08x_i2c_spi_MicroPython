@@ -100,7 +100,7 @@ class BNO08X_SPI(BNO08X):
             raise TypeError(f"reset_pin (RST) must be a Pin object or None, not {type(reset_pin)}")
         self._reset_pin = reset_pin
 
-        self._header = bytearray(4)  # efficient spi handling of header read
+        self._header = bytearray(4)  # SHTP headers are 4 bytes only
         self._header_mv = memoryview(self._header)
 
         super().__init__(_interface, reset_pin=reset_pin, int_pin=int_pin, cs_pin=cs_pin, wake_pin=wake_pin,
@@ -109,18 +109,13 @@ class BNO08X_SPI(BNO08X):
     @micropython.native
     def _wait_for_int(self, timeout_us=1000):
         if self._int_pin.value() == 0:
-            return
+            return True
 
         start = ticks_us()
-        # Check the raw pin value directly
-        while True:
-            if self._int_pin.value() == 0:
-                return
-
+        while self._int_pin.value() != 0:
             if ticks_diff(ticks_us(), start) > timeout_us:
-                break
-
-        raise RuntimeError("BNO08X UART _wait_for_int Timeout: 1ms exceeded")
+                return False 
+        return True
 
     def _send_packet(self, channel, data):
         seq = self._tx_sequence_number[channel]
@@ -140,39 +135,33 @@ class BNO08X_SPI(BNO08X):
         sleep_ms(10)
         return
 
-    def _read_packet(self, wait=None):
+    @micropython.native
+    def _read_packet(self, wait=False):
         if self._int_pin.value() != 0:
-            return None # NOTE: not a tuple! must check for None first, then unpack return
-#         wait = bool(wait)  # wait=None & wait=False are non-blocking
-#         if not wait and self._int_pin.value() != 0:
-#             return None # NOTE: not a tuple! must check for None first, then unpack return
-# 
-#         if wait and self._int_pin.value() != 0:
-#             self._wait_for_int()
+            if not wait:
+                return None
+            if not self._wait_for_int(timeout_us=50000):
+                return None
+        
+        # Local references to avoid repeated attribute lookups
+        spi = self._spi
+        cs_pin  = self._cs_pin
+        h_mv = self._header_mv
+        h = self._header
 
         # SPI Header read
-        self._cs_pin.value(0)
+        cs_pin.value(0)
         sleep_us(1)
-        self._spi.readinto(self._header_mv, 0x00)
-        # NOTE: CS is still 0, must raise to (1) after payload read, or when errors out
+        spi.readinto(h_mv, 0x00) # CS is still 0, must set to 1 after payload read, or if error
 
-        h = self._header
-        raw_packet_bytes = h[0] | (h[1] << 8)
+        raw_packet_bytes = (h[1] << 8) | h[0]
         if raw_packet_bytes == 0:  # fast return if 0 payload
-            self._cs_pin.value(1)
-            # self._dbg("_read_packet: packet_bytes=0, returning None.")
-            return None # NOTE: not a tuple! must check for None first, then unpack return
-        channel = h[2]
-        seq = h[3]
+            cs_pin.value(1)
+            return None # NOTE: not a tuple! must check for None first, only if data then unpack tuple
 
-        # * comment out self._dbg for normal operation, adds delay even with debug=False
-        # self._dbg(f"packet header: {packet_bytes=} {channel=} {seq=} ")
-
-        self._rx_sequence_number[channel] = seq  # SH2 Sequence number
-
-        if raw_packet_bytes == 0xFFFF:  # this shows bad sensor
-            self._cs_pin.value(1)
-            raise OSError(f"FATAL BNO08X Error: Invalid SHTP header(0xFFFF), BNO08x sensor corrupted?")
+#         if raw_packet_bytes == 0xFFFF:  # this shows bad sensor
+#             self._cs_pin.value(1)
+#             raise OSError(f"FATAL BNO08X Error: Invalid SHTP header(0xFFFF), BNO08x sensor corrupted?")
 
         payload_bytes = (raw_packet_bytes & 0x7FFF) - 4
 
@@ -180,11 +169,10 @@ class BNO08X_SPI(BNO08X):
             self._data_buffer = bytearray(payload_bytes)
 
         if payload_bytes <= _SHTP_MAX_CARGO_PACKET_BYTES:
-
-            # SPI Payload read, because CS was not de-asserted
+            # SPI Payload read, because CS was not de-asserted BNO08x will not resend header
             mv = memoryview(self._data_buffer)[:payload_bytes]
-            self._spi.readinto(mv, 0x00)
-            self._cs_pin.value(1)
+            spi.readinto(mv, 0x00)
+            cs_pin.value(1)
 
         else:
             print(
@@ -205,9 +193,11 @@ class BNO08X_SPI(BNO08X):
                 self._dbg(f"CONTINUATION in _read_packet: {packet_bytes=}")
                 # raise PacketError("read partial packet")
 
+        channel = h[2]
+        seq = h[3]
         self._rx_sequence_number[channel] = seq  # report sequence number
 
-        # * comment out self._dbg for normal operation, adds 105ms delay even with debug=False
-        # self._dbg(f" Received Packet *************{self._packet_decode(payload_bytes + 4, channel, seq, mv)}")
+        # * comment out self._dbg for normal operation, adds 105ms delay even with debug=False, if self._debug also helps
+        # if self._debug: self._dbg(f" Received Packet *************{self._packet_decode(payload_bytes + 4, channel, seq, mv)}")
 
         return mv, channel, payload_bytes
