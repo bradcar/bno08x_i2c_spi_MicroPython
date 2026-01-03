@@ -10,22 +10,14 @@ I2C Class that requires BNO08X base Class
 
 from struct import pack
 
-import uctypes
 from machine import Pin
 from micropython import const
-from utime import ticks_us, ticks_ms, ticks_diff, sleep_us
+from utime import ticks_us, ticks_diff
 
 from bno08x import BNO08X
 
 _BNO08X_DEFAULT_ADDRESS = const(0x4B)
 _BNO08X_BACKUP_ADDRESS = const(0x4A)
-
-# TODO Need to find definitive value
-# 272 bytes shown in ll-test GitHub
-# 256 returned by Advertisement debug=True, TAG_MAX_CARGO_PLUS_HEADER_READ
-#     BUT, then Arduino code subtracts 4, which is header size?
-# 252: Advertisement spi, i2c, and uart:  header+payload = 256
-_SHTP_MAX_CARGO_PACKET_BYTES = 284
 
 
 def _is_i2c(obj) -> bool:
@@ -39,7 +31,7 @@ def _is_i2c(obj) -> bool:
 
 
 class BNO08X_I2C(BNO08X):
-    """Library for the BNO08x IMUs on I2C
+    """ I2C Interface Library for the BNO08x IMUs
 
     Args:
         reset_pin: required to hard reset BNO08x, only reliable way to boot
@@ -78,7 +70,7 @@ class BNO08X_I2C(BNO08X):
         if reset_pin is not None and not isinstance(reset_pin, Pin):
             raise TypeError(f"Reset (RST) pin must be a Pin object or None, not {type(reset_pin)}")
         self._reset = reset_pin
-        
+
         self._header = bytearray(4)  # efficient spi handling of header read
         self._header_mv = memoryview(self._header)
 
@@ -97,7 +89,7 @@ class BNO08X_I2C(BNO08X):
         start = ticks_us()
         while self._int_pin.value() != 0:
             if ticks_diff(ticks_us(), start) > timeout_us:
-                return False 
+                return False
         return True
 
     def _send_packet(self, channel, data):
@@ -117,60 +109,52 @@ class BNO08X_I2C(BNO08X):
     @micropython.native
     def _read_packet(self, wait=False):
         if self._int_pin.value() != 0:
-            if not wait:
+            if not wait or not self._wait_for_int(timeout_us=50000):
                 return None
-            if not self._wait_for_int(timeout_us=50000):
-                return None
-            
-        # Local references to avoid repeated attribute lookups
+
         i2c = self._i2c
         i2c_addr = self._bno_i2c_addr
         h_mv = self._header_mv
         h = self._header
 
-        # Read 4-byte SHTP header and process
+        # Initial 4-byte header
         i2c.readfrom_into(i2c_addr, h_mv)
 
         raw_packet_bytes = (h[1] << 8) | h[0]
-        if raw_packet_bytes == 0:  # fast return if 0 payload
-            # self._dbg("_read_packet: packet_bytes=0, returning None.")
-            return None # NOTE: not a tuple! must check for None first, then unpack return
+        if raw_packet_bytes == 0 or raw_packet_bytes == 0xFFFF:
+            return None
 
-        # if raw_packet_bytes == 0xFFFF:  # bad sensor         
-        #     raise OSError(f"FATAL BNO08X Error: Invalid SHTP header(0xFFFF), sensor corrupted?")
-
+        is_continuation = bool(raw_packet_bytes & 0x8000)
         packet_bytes = raw_packet_bytes & 0x7FFF
-        payload_bytes = packet_bytes - 4
 
-        if packet_bytes > len(self._data_buffer):
-            self._data_buffer = bytearray(packet_bytes)
+        # if fresh packet, clear previous assembly buffer
+        if not is_continuation:
+            self._assembly_buffer = bytearray()
+            self._target_len = packet_bytes
 
-        if packet_bytes <= _SHTP_MAX_CARGO_PACKET_BYTES:
-            header_payload_mv = memoryview(self._data_buffer)[:packet_bytes]
-            i2c.readfrom_into(i2c_addr, header_payload_mv, packet_bytes)
-            mv = header_payload_mv[4:]
-        else:
-            print(f"FRAGMENTED PACKET - {packet_bytes=} and {_SHTP_MAX_CARGO_PACKET_BYTES=}")
-            print(f"***** NEED to implement multi-packet reads, erasing header")
-            print(f"* Have yet to see packet_bytes > 193 bytes, algorithm sketched out")
-            print(f"* Ceva and others have no clear documentation of the max cargo bytes value")
-            print(f"{self._data_buffer}")
-            raise NotImplementedError("The multi-packet reads are NOT unimplemented. TODO")
+        # self._max_header_plus_cargo set in advertisement (256), originally set to 284 to cover big advertisement packet
+        fragment_bytes = min(packet_bytes, self._max_header_plus_cargo)
 
-            # at startup some first packets have continuation, likely missed the packet before
-            # when the payload bytes are longer than the xxxxx then we must processess the next packet
-            # this should have continuation bit set
-            continuation = bool(raw_packet_bytes & 0x8000)
-            if continuation:
-                self._dbg(f"CONTINUATION in _read_packet: {packet_bytes=}")
-                # raise PacketError("read partial packet")
+        if fragment_bytes > len(self._data_buffer):
+            self._data_buffer = bytearray(fragment_bytes)
+
+        fragment_mv = memoryview(self._data_buffer)[:fragment_bytes]
+        i2c.readfrom_into(i2c_addr, fragment_mv)
+        self._assembly_buffer.extend(fragment_mv[4:])  # Append cargo only, skip fragment header
 
         channel = h[2]
         seq = h[3]
-        self._rx_sequence_number[channel] = seq  # report sequence number
+        self._rx_sequence_number[channel] = seq
+
+        if len(self._assembly_buffer) + 4 < self._target_len:
+            if self._wait_for_int(timeout_us=10000):
+                return self._read_packet(wait=True)  # next header will have continuation bit set
+
+        payload_bytes = len(self._assembly_buffer)
+        mv = memoryview(self._assembly_buffer)[:payload_bytes]
 
         # * comment out self._dbg for normal operation, adds 105ms delay even with debug=False, if self._debug also helps
-        #if self._debug: self._dbg(f" Received Packet *************{self._packet_decode(payload_bytes + 4, channel, seq, mv)}")
+        # if self._debug:
+        #     self._dbg(f" Received Packet *************{self._packet_decode(payload_bytes + 4, channel, seq, mv)}")
 
-        # return packet's payload and channel, payload_length can be derived len(payload)
         return mv, channel, payload_bytes
