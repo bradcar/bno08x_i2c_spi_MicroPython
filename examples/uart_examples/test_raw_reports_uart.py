@@ -20,11 +20,11 @@ from uart import BNO08X_UART
 int_pin = Pin(14, Pin.IN, Pin.PULL_UP)  # Interrupt, BNO (RST) signals when ready
 reset_pin = Pin(15, Pin.OUT, value=1)  # Reset, tells BNO (INT) to reset
 
-uart = UART(1, baudrate=3_000_000, tx=Pin(8), rx=Pin(9))
+uart = UART(1, baudrate=3000000, tx=Pin(8), rx=Pin(9))
+print(uart)  # baudrate 3000000 required
 
 bno = BNO08X_UART(uart, reset_pin=reset_pin, int_pin=int_pin)
 
-print(uart)  # baudrate 3000000 required
 print("Start")
 print("====================================\n")
 
@@ -36,9 +36,10 @@ bno.raw_gyro.enable()
 bno.print_report_period()
 
 while True:
-    # Required each loop to refresh sensor data
+    # Update required each loop to check if any sensor updated, print sensor data (some or all may be old data)
+    # see test_reports_full_uart.py, for example of only printing a sensor when it is updated
     bno.update_sensors()
-
+        
     accel_x, accel_y, accel_z, ts_us = bno.raw_acceleration
     print(f"\nRaw Acceleration:  X: {accel_x:#06x}  Y: {accel_y:#06x}  Z: {accel_z:#06x} {ts_us=}")
 

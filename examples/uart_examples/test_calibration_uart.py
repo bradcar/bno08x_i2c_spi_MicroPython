@@ -14,11 +14,12 @@ from utime import ticks_ms
 int_pin = Pin(14, Pin.IN, Pin.PULL_UP)  # Interrupt, BNO (RST) signals when ready
 reset_pin = Pin(15, Pin.OUT, value=1)  # Reset, tells BNO (INT) to reset
 
-uart = UART(1, baudrate=3_000_000, tx=Pin(8), rx=Pin(9))
+uart = UART(1, baudrate=3000000, tx=Pin(8), rx=Pin(9))
+print(uart)  # baudrate 3000000 required
 
 bno = BNO08X_UART(uart, reset_pin=reset_pin, int_pin=int_pin)
 
-print(uart)  # baudrate 3000000 required
+
 print("Start")
 print("====================================\n")
 
@@ -40,7 +41,6 @@ bno.begin_calibration
 bno.calibration_status
 
 print(f"\nCalibration: Continue for {good_before_save} secs of \"Medium Accuracy\" to \"High Accuracy\"\n")
-
 
 last_print = ticks_ms()
 start_good = None

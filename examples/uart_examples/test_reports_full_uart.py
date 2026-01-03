@@ -23,30 +23,31 @@ from utime import ticks_ms
 int_pin = Pin(14, Pin.IN, Pin.PULL_UP)  # BNO sensor (INT)
 reset_pin = Pin(15, Pin.OUT, value=1)  # BNO sensor (RST)
 
-uart = UART(1, baudrate=3000000, tx=Pin(8), rx=Pin(9))
+uart = UART(1, baudrate=3000000, tx=Pin(8), rx=Pin(9), rxbuf=1024)
+print(uart)  # baudrate 3000000 required
 
 bno = BNO08X_UART(uart, reset_pin=reset_pin, int_pin=int_pin)
 
-print(uart)  # baudrate 3000000 required
 print("Start")
 print("====================================\n")
 
-bno.acceleration.enable(100)
-bno.magnetic.enable(100)
-bno.gyro.enable(100)
-bno.quaternion.enable(100)
-
+bno.acceleration.enable(20)
+bno.magnetic.enable(20)
+bno.gyro.enable(20)
+bno.quaternion.enable(20)
 bno.print_report_period()
 
 print("\nStart loop:")
 while True:
     
-    # Required each loop to refresh sensor data
+    # Update required each loop to check if any sensor updated, print timestamp if any sensor was updated
     if bno.update_sensors() > 0:    
         ms_since_sensor_start = bno.bno_start_diff(ticks_ms())
         print(f"\nsystem {ticks_ms()=},",
             f"time from BNO start: {ms_since_sensor_start/1000.0:.3f} s",
             f"({ms_since_sensor_start:.0f} ms)")
+    
+    # Only print sensor report if it has been updated since last loop
     
     if bno.acceleration.updated:
         accel_x, accel_y, accel_z, acc, ts_ms = bno.acceleration.full
