@@ -129,13 +129,13 @@ _COMMAND_EXE_REPORT = const(0x01)  # Report to Acknowledge Command execute
 _COMMAND_RESET = const(0x01)  # Soft Reset command on Chan 0
 
 # Advertisement Tag Processors: {tag_id: (name, format, subtract_header_4, clamp_max_1024)}
-_tag_dictionary = {0: ("TAG_NULL", 'S', 0), 1: ("TAG_GUID", '<I', 0),
-                   2: ("Max Cargo Write", '<H', 1), 3: ("Max Cargo Read", '<H', 1),
-                   4: ("TAG_MAX_TRANSFER_WRITE", '<H', 0), 5: ("TAG_MAX_TRANSFER_READ", '<H', 0),
-                   6: ("TAG_NORMAL_CHANNEL", '<B', 0), 7: ("TAG_WAKE_CHANNEL", '<B', 0),
-                   8: ("TAG_APP_NAME", 'S', 0), 9: ("TAG_CHANNEL_NAME", 'S', 0),
-                   10: ("TAG_ADV_COUNT", '<B', 0), 0x80: ("SHTP Version", 'S', 0),
-                   0x81: ("Report List, lengths", 'R', 0)
+_tag_dictionary = {0: ("TAG_NULL", 'S'), 1: ("TAG_GUID", '<I'),
+                   2: ("Max Cargo Write", '<H'), 3: ("Max Cargo Read", '<H'),
+                   4: ("TAG_MAX_TRANSFER_WRITE", '<H'), 5: ("TAG_MAX_TRANSFER_READ", '<H'),
+                   6: ("TAG_NORMAL_CHANNEL", '<B'), 7: ("TAG_WAKE_CHANNEL", '<B'),
+                   8: ("TAG_APP_NAME", 'S'), 9: ("TAG_CHANNEL_NAME", 'S'),
+                   10: ("TAG_ADV_COUNT", '<B'), 0x80: ("SHTP Version", 'S'),
+                   0x81: ("Report List, lengths", 'R')
                    }
 
 # Status Constants
@@ -729,7 +729,7 @@ class BNO08X:
         # track RX(inbound) and TX(outbound) sequence numbers one per channel, one per direction
         self._rx_sequence_number: list[int] = [0, 0, 0, 0, 0, 0]
         self._tx_sequence_number: list[int] = [0, 0, 0, 0, 0, 0]
-        self._max_cargo_write = 0
+        self._max_header_plus_cargo = 284 # big enough for 1st advertisement which will reset this to 256
         self._advertisement_received = False
 
         self._dcd_saved_at: float = -1
@@ -842,7 +842,7 @@ class BNO08X:
         if packet_length - _SHTP_HEADER_LEN == 15 and channel == SHTP_CHAN_INPUT and report_id == 0xfb:
             outstr += f"DBG::\t\t Report 1: {_REPORTS_DICTIONARY[payload[5]]} ({hex(payload[5])})\n"
 
-        # New Stye Advertisement Response provides sensor information
+        # New Stye Advertisement Response gives sensor information, first time is 284 bytes, when request is 51 bytes
         if packet_length - _SHTP_HEADER_LEN >= 51 and channel == SHTP_CHAN_COMMAND and report_id == _COMMAND_ADVERTISE:
             outstr += "DBG::\t\tNew Style SHTP Advertisement Response (0x00), channel: SHTP_COMMAND (0x0)\n"
             return outstr
@@ -1401,7 +1401,7 @@ class BNO08X:
                 value = report_bytes[value_index:next_index]
 
                 if tag in _tag_dictionary:
-                    name, fmt, sub_hdr = _tag_dictionary[tag]
+                    name, fmt = _tag_dictionary[tag]
                     if fmt == 'S':
                         decoded_str = bytes(value).decode('utf-8', 'ignore').strip('\x00')
                         s = "" if tag == 0 else f": {decoded_str}"
@@ -1416,10 +1416,9 @@ class BNO08X:
                             sub_idx += 2
                     else:
                         v = unpack_from(fmt, value, 0)[0]
-                        if sub_hdr: v -= 4
                         outstr += f"DBG::\t\t {name}: {v}\n"
                     if tag == 2:
-                        self._max_cargo_write = v
+                        self._max_header_plus_cargo = v
                 else:
                     outstr += f"DBG::\t\t Unknown tag = {tag}\n"
 
