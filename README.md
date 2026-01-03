@@ -169,7 +169,7 @@ If your code requests reports faster than the report feature frequency specified
 
 ## Sensor reports - next iteration
 
-Each reading of sensor reports, example bno.gyro, will return the most recent value. 
+Each reading of sensor report will return the most recent value. 
 If the sensor has not started, it returns a value of zero. If the sensor has not updated, the last value is returned again.
 To check for new data, use the .updated modifier for any sensor call, then get the value.
 
@@ -308,9 +308,20 @@ The actual sensor period will vary from the attempted period returned by this fu
     period_ms = (1.0 / accelerometer_hertz) * 1000.0
     print(f"Accelerometer: {period_ms:.1f} ms, {accelerometer_hertz:.1f} Hz")
 
-Currently On Pico 2 W with one quaternions sensor report ever 1ms, the fastest updates we've seen on SPI and I2C is 1.2 ms (833Hz).
-When you request report frequencies at faster than the sensor can service the reporting frequency will slow.
+When you request report frequencies at faster than the host can service the sensor the reporting frequency will slow.
+Some sensor reports like Accleration can quickly be served by the BNO08x because it requires few computations.
+The Quaternian requires fusion algorithm which can cause delays.
 Try you own experiments and let me know what you find.
+
+| **Hz** | **ms** | **I2C/Quat** | **I2C/Acc** | **SPI/Quat** | **SPI/Acc** |
+|--------|--------|--------------|-------------|--------------|-------------|
+| 1000   | 1.0    | 6.1          | -           | 3.7          | -           |
+| 500    | 2.0    | 6.1          | 2.0         | 5.2          | 2.0         |
+| 400    | 2.5    | 6.1          | -           | 2.5          | -           |
+| 250    | 4.0    | -            | 4.0         | -            | 4.0         |
+| 200    | 5.0    | 5.1          | -           | 5.0          | -           |
+| 125    | 8.0    | -            | 7.9         | -            | 8.0         |
+| 100    | 10.0   | 10.0         | -           | 10.0         | -           |
 
 Refer to the BNO080_085-Datasheet.pdf (page 50) for Maximum sensor report rates by report type.
 
