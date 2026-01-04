@@ -158,18 +158,13 @@ We also supply the following conversion helper function:
 ## Option to Change Sensor Report Frequency
 
 The default sensor update frequencies are 10 to 20 Hz.
-You can request different frequecies and the BNO08X will pick the closest frequency it can provide.
+You can request different frequecies and the BNO08X will pick the closest frequency it can provide. See (_Details on Report Frequencies_) for more details.
 
     bno.acceleration.enable(40)  # enable accelerometer reports at 40 Hertz (can also use 40.0)
 
-See the seletion below on (_Details on Report Frequencies_) for more details.
-If your code requests reports faster than the report feature frequency specified, repeated values will be returned.
-
 ## Sensor reports - next iteration
 
-Each reading of sensor report will return the most recent value. 
-If the sensor has not started, it returns a value of zero. If the sensor has not updated, the last value is returned again.
-To check for new data, use the .updated modifier for any sensor call, then get the value.
+Each reading of sensor report will return the most recent value. To check for new data, use the .updated modifier for any sensor call, then get the value.
 
     bno.update_sensors()
     if bno.quaternion.updated:
@@ -200,12 +195,9 @@ Most computer games use this implementation for smooth and predictable graphics.
 ## I2C Clock-stretch Issues on BNO08x and Communication Errors
 
 Unfortunately, the BNO080, BNO085, and BNO086 all use **_non-standard clock stretching_** on I2C.
-This causes a variety of issues including report errors and the need to restart/reset the sensor.
-Clock stretching interferes with various chips (ex: RP2) in different ways.
-If you see ETIMEDOUT, this is likely the issue (BNO08X Datasheet 1000-3927 v1.17, page 15).
-Some have had good results with software I2C (emulation). We do not know how much this impacts performance.
-
-The good news is that this library has been optimized for efficiency. The faster the host reads the sensor the less likely that the BNO08x will start to clock stretch.
+This causes a variety of issues including report errors and the need to restart/reset the sensor if the microcontroller has not responded quickly enough.
+This library has been optimized for efficiency and is likely to avoid clock stretching.
+Clock stretching interferes with various chips (ex: RP2) in different ways (BNO08X Datasheet 1000-3927 v1.17, page 15).
 
 ## SPI Setup - High Speed & Stable (No Clock-Stretch Issues)
 
