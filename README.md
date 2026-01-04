@@ -223,10 +223,10 @@ On the Sparkfun BNO086 when using SPI, you must clear I2C jumper when using SPI 
     print(spi)
 
 Required for SPI:
-- int_pin : required for operation and also gives accurate sensor timestamps. Define a Pin object, not  number.
-- reset_pin : required for operation after sensor power up. It is a Pin object, not number
-- wake_pin : required for SPI operation. 
-- cs_pin : required for SPI operation.
+- int_pin : required for accurate sensor timestamps. It is a Pin object, not number.
+- reset_pin: requiews for hardware reset. It is a Pin object, not number.
+- wake_pin : required for SPI operation. It is a Pin object, not number.
+- cs_pin : required for SPI operation. It is a Pin object, not number.
 
 Optional for SPI:
 - debug : prints very detailed logs, primarily for driver debug & development.
@@ -255,8 +255,8 @@ uart = UART(1, baudrate=3000000, tx=Pin(8), rx=Pin(9), timeout=2000)
 uart = UART(0, baudrate=3000000, tx=Pin(12), rx=Pin(13), timeout=2000)
 
 Required for UART:
-- int_pin : required by UART for accurate sensor timestamps. Define a Pin object, not number.
-- reset_pin : used by UART for hardware reset, if not defined uses soft reset. It is a Pin object, not number
+- int_pin : required for accurate sensor timestamps. It is a Pin object, not number.
+- reset_pin: requiews for hardware reset. It is a Pin object, not number.
 
 ## Details on Report Frequencies
 
@@ -344,10 +344,10 @@ The raw reports, which do not use sensor fusion calculations, can be accessed fo
 magnetic, and gyro sensors. It is not generally recommended to use these reports, because they require signficant coding (careful
 calibaration, Kalman filters, etc.). Starting background on Fusion algorithms: https://www.youtube.com/watch?v=0rlvvYgmTvI
 
-Please read all references below when attempting to use raw reports.
+Please read the references below before attempting to use raw reports. The raw sensors timestamps are not well-documented in Ceva documentation.
 
 In addition, there are other sensor reports possible with the bno08x sensors that this driver has not fully
-implemented. See code source for details. The raw sensors timestamps are not well-documented in Ceva documentation.
+implemented. See code source for details. 
 
 ## UART-RVC is NOT SUPPORTED by this driver (RVC, Robot Vacuum Cleaners)
 
@@ -356,7 +356,7 @@ This is a very different protocol and not supported in my driver. Take a look at
 
 ## References
 
-The CEVA BNO085 and BNO086 9-axis sensors are made by Ceva (https://www.ceva-ip.com). They are based on Bosch hardware but use Hillcrest Labs’ proprietary sensor fusion software. BNO086 is backwards compatible with BNO085 and both are pin-for-pin replacements for Bosch Sensortec’s discontinued BNO055 and BMF055 sensors.
+The CEVA BNO085 and BNO086 9-axis sensors are made by Ceva (https://www.ceva-ip.com). These sensors are based on Bosch hardware but use Hillcrest Labs’ proprietary sensor fusion software. BNO086 is backwards compatible with BNO085 and both are pin-for-pin replacements for Bosch Sensortec’s discontinued BNO055 and BMF055 sensors.
 
 - https://www.ceva-ip.com/wp-content/uploads/BNO080_085-Product-Brief.pdf
 - https://www.ceva-ip.com/wp-content/uploads/BNO080_085-Datasheet.pdf
