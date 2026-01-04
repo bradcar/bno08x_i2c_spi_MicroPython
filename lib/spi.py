@@ -147,6 +147,7 @@ class BNO08X_SPI(BNO08X):
         h = self._header
 
         # Read Header 
+        cs.value(0)
         sleep_us(1)
         spi.readinto(h_mv, 0x00) # CS held low
 
