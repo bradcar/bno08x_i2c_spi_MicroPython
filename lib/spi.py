@@ -7,43 +7,27 @@
 """
 SPI Class that requires BNO08X base Class
 
-BNO08x sensor use the non-defaul SPI. This driver reconfigures SPI to those settings.
+BNO08x sensors use the non-default SPI settings. This code reconfigures SPI to required settings.
 BNO08X Datasheet (1.2.4.2 SPI) requires CPOL = 1 and CPHA = 1, which is: polarity=1 and phase=1
 
-The BNO08x's SPI protocol has two main transactions:
-1) Host → BNO08x (Write Command): The host initiates the transfer to send a command or data.
-2) Host ← BNO08x (Read Data): The host initiates the transfer to read the BNO08x's data.
+The INT pin is used to tell the host when the BNO08x has data ready to read.
+The BNO08x datasheet says the host must respond to H_INTN assertion within ≈10ms to avoid starvation. 
 
-The INT pin is used to tell the host when the BNO08x has data ready (for a Read).
-Requiring an active-low INT signal before the host sends a command (a Write) is overly strict.
-The BNO08x documentation indicates that for a host-to-BNO write, the host is usually free to
-initiate the transfer.
+Using SPI, a wait signal is used to signal a  microcontroller-to-BNO write.
 
-TODO: The BNO08x datasheet says the host must respond to H_INTN assertion within ≈10ms
-to avoid starvation. While the 3.0s timeout prevents lockup, the sleep_ms(10) in
-the loop means the driver will frequently miss the 10ms deadline when polling.
-
-Ideas for multiple sensors on SPI - untested & this driver may need more code
-Each Sensor needs:
-* its own Chip Select (cs_pin) to each BNO CS pins
-* its own Interrupt (int_pin) to each BNO Int pins
-* they can share the Reset (reset_pin) which must be connected to all the BNO RST pins.
-* they can share the three SPI signals which must be connected to all the BNOs.
-
+Using multiple sensors on SPI - untested with this driver
+* Each BNO08x needs its own Chip Select (cs_pin) to each BNO CS pins
+* Each BNO08x needs its own Interrupt (int_pin) to each BNO Int pins
+* Each BNO08x needs its own Wake (wake_pin) to each BNO Int pins
+* they can share the Reset (reset_pin), a reset on one resets all sensors
+* they can share the three SPI signals (sck, mosi, miso) new names=(sck, pico, poci)
 """
 from struct import pack
 
-from machine import Pin
-from utime import ticks_us, ticks_diff, sleep_us, sleep_ms
-
 from bno08x import BNO08X
+from machine import Pin
+from utime import ticks_us, ticks_diff, sleep_us
 
-# TODO Need to find definitive value
-# 272 bytes shown in ll-test GitHub
-# 256 returned by Advertisement debug=True, TAG_MAX_CARGO_PLUS_HEADER_READ
-#     BUT, then Arduino code subtracts 4, which is header size?
-# 252: Advertisement spi, i2c, and uart:  header+payload = 256
-_SHTP_MAX_CARGO_PACKET_BYTES = 284
 
 def _is_spi(obj) -> bool:
     """Check that SPI object has required interfaces"""
@@ -114,7 +98,7 @@ class BNO08X_SPI(BNO08X):
         start = ticks_us()
         while self._int_pin.value() != 0:
             if ticks_diff(ticks_us(), start) > timeout_us:
-                return False 
+                return False
         return True
 
     def _send_packet(self, channel, data):
@@ -127,7 +111,7 @@ class BNO08X_SPI(BNO08X):
             self._dbg(f"  Sending Packet *************{self._packet_decode(write_length, channel, seq, data)}")
 
         self._cs_pin.value(0)
-        sleep_us(1) # BNO08x Figure 6-6: SPI timing, needs > 31ns
+        sleep_us(1)  # BNO08x Figure 6-6: SPI timing, needs > 31ns
         self._spi.write(send_packet)
         self._cs_pin.value(1)
 
@@ -148,45 +132,49 @@ class BNO08X_SPI(BNO08X):
         # Read Header 
         cs.value(0)
         sleep_us(1)
-        spi.readinto(h_mv, 0x00) # CS held low, so only read payload below
+        spi.readinto(h_mv, 0x00)  # CS held low, so only read payload below
 
         raw_packet_bytes = (h[1] << 8) | h[0]
         if raw_packet_bytes == 0:
             cs.value(1)
-            return None # Must check for None (non-tuple) first then can unpack tuple
+            return None  # Must check for None (non-tuple) first, then can unpack data tuple
         if raw_packet_bytes == 0xFFFF:
             cs.value(1)
             raise OSError("FATAL BNO08X Error: Invalid SHTP header(0xFFFF), BNO08x sensor corrupted?")
 
         packet_bytes = raw_packet_bytes & 0x7FFF
-        
-        # if fresh packet, clear previous assembly buffer, first header shows multi-packet lenght
-        is_continuation = bool(raw_packet_bytes & 0x8000)
-        if not is_continuation:
-            self._assembly_buffer = bytearray()
-            self._target_len = packet_bytes
+        is_continuation = bool(raw_packet_bytes & 0x8000) # not True for first packet
 
-        # advertisement sets self._max_header_plus_cargo=256, originally set to 284 to cover big advertisement packet
-        fragment_bytes = min(packet_bytes, self._max_header_plus_cargo)
-        
+        # payload fragment to read, advertisement sets _max_header_plus_cargo=256, initial was 284 for big advertisement
+        fragment_bytes = min(packet_bytes, self._max_header_plus_cargo) - 4
+
         # SPI with CS still low, we only read payload
-        fragment_bytes = fragment_bytes - 4
-        if fragment_bytes > len(self._data_buffer):
-            self._data_buffer = bytearray(fragment_bytes)
-
         fragment_mv = memoryview(self._data_buffer)[:fragment_bytes]
         spi.readinto(fragment_mv, 0x00)
         cs.value(1)
-        self._assembly_buffer.extend(fragment_mv)  # Append cargo only, skip fragment header
 
         channel = h[2]
         seq = h[3]
         self._rx_sequence_number[channel] = seq
 
-        # check if we need to read more packets to complete 1st fragment
+        # Single Packet fast path
+        if not is_continuation and packet_bytes <= self._max_header_plus_cargo:
+            # * comment out self._dbg for normal operation, self._dbg very slow if uncommented even if debug=False
+            # if self._debug:
+            #     self._dbg(f" Received Packet *************{self._packet_decode(payload_bytes + 4, channel, seq, mv)}")
+            return fragment_mv, channel, fragment_bytes
+
+        # Multipart assembly
+        if not is_continuation:
+            self._assembly_buffer = bytearray()
+            self._target_len = packet_bytes
+
+        self._assembly_buffer.extend(fragment_mv)
+
+        # check and read more fragments
         if len(self._assembly_buffer) + 4 < self._target_len:
             if self._wait_for_int(timeout_us=10000):
-                return self._read_packet(wait=True)  # next header will have continuation bit set
+                return self._read_packet(wait=True)
 
         payload_bytes = len(self._assembly_buffer)
         mv = memoryview(self._assembly_buffer)[:payload_bytes]
