@@ -7,6 +7,8 @@
 """
 Subclass of `BNO08X` to use UART
 
+WARNING MUST DO BNO08x POWER Cycle using SPI codes on same device HARD RESET IS  **NOT** SUFFICIENT
+
 To select UART-SHTP, PS1 must be high "1" and PS0/WAKE must be ground "0".
 This driver does not support UART-RVC mode. This means for UART operation reqires wake_pin is None, wake_pin=None
 
@@ -45,12 +47,6 @@ from utime import sleep_ms, sleep_us, ticks_ms, ticks_us, ticks_diff
 
 from bno08x import BNO08X
 
-# TODO Need to find definitive value
-# 272 bytes shown in ll-test GitHub
-# 256 returned by Advertisement debug=True, TAG_MAX_CARGO_PLUS_HEADER_READ
-#     BUT, then Arduino code subtracts 4, which is header size?
-# 252: Advertisement spi, i2c, and uart:  header+payload = 256
-_SHTP_MAX_CARGO_PACKET_BYTES = 284
 
 class BNO08X_UART(BNO08X):
     """
@@ -157,7 +153,7 @@ class BNO08X_UART(BNO08X):
         if self._debug:
             self._dbg(f"  Sending Packet *************{self._packet_decode(write_length, channel, seq, data)}")
 
-        # ---start--- UART Send packet - handle SHTP protocol
+        # UART Send packet - handle SHTP protocol
         self._uart.write(b"\x7e")  # start byte
         sleep_us(100)
         self._uart.write(b"\x01")  # SHTP byte
@@ -174,7 +170,6 @@ class BNO08X_UART(BNO08X):
         # UART end byte
         self._uart.write(b"\x7e")
         sleep_us(100)
-        # ----end---- UART Send packet - handle SHTP protocol: 
 
         self._tx_sequence_number[channel] = (seq + 1) % 256
         return self._tx_sequence_number[channel]
@@ -213,11 +208,9 @@ class BNO08X_UART(BNO08X):
         byte_buf = self._byte_buf
         h = self._header
 
-        # ---start--- UART Header read - handle SHTP protocol: 
-        # UART read until read 0x7E start byte
+        # UART Header read - handle SHTP protocol, read until see 0x7E start byte
         start_time_read = ticks_ms()
         while True:
-            # Replaced self._uart.read(1) with readinto
             if uart.readinto(byte_buf, 1) == 0:
                 if ticks_diff(ticks_ms(), start_time_read) > 100:
                     return None
@@ -232,32 +225,30 @@ class BNO08X_UART(BNO08X):
             if byte_buf[0] != 0x7E:
                 break
 
-        # Check the SHTP Protocol ID (0x01)
-        # self._byte_buf[0] currently holds the first byte after the 0x7E sequence
+        # Check the SHTP Protocol ID (0x01), self._byte_buf[0] has first byte after the 0x7E sequence
         if byte_buf[0] != 0x01:
             return None
 
-        # Read header bytes (uses the refactored _read_into internally)
+        # Read header bytes with self._read_into
         self._read_into(self._header_mv, start=0, end=4)
 
         raw_packet_bytes = h[0] | (h[1] << 8)
         if raw_packet_bytes == 0:
             return None 
             
-        # if raw_packet_bytes == 0xFFFF: 
-        #     raise OSError(f"FATAL BNO08X Error: Invalid SHTP header(0xFFFF), BNO08x sensor corrupted?")
+        if raw_packet_bytes == 0xFFFF: 
+            raise OSError(f"FATAL BNO08X Error: Invalid SHTP header(0xFFFF), BNO08x sensor corrupted?")
 
         payload_bytes = (raw_packet_bytes & 0x7FFF) - 4
 
         if payload_bytes > len(self._data_buffer):
             self._data_buffer = bytearray(payload_bytes)
 
-        if payload_bytes <= _SHTP_MAX_CARGO_PACKET_BYTES:
+        if payload_bytes <= self._max_header_plus_cargo:
             mv = memoryview(self._data_buffer)[:payload_bytes]
-            # Read payload using refactored _read_into
             self._read_into(mv, start=0, end=payload_bytes)
 
-            # Replaced self._uart.read(1) with readinto for packet termination
+            # Dheck for packet termination
             if uart.readinto(byte_buf, 1) == 0:
                 raise RuntimeError("_read_packet payload: Timeout while waiting for packet end")
 
@@ -265,7 +256,7 @@ class BNO08X_UART(BNO08X):
                 return None
 
         else:
-            print(f"FRAGMENTED PACKET - {raw_packet_bytes=} and {_SHTP_MAX_CARGO_PACKET_BYTES=}")
+            print(f"FRAGMENTED PACKET - {raw_packet_bytes=} and {self._max_header_plus_cargo=}")
             print(f"***** NEED to implement multi-packet reads, erasing header")
             print(f"* Have yet to see raw_packet_bytes > 193 bytes, algorithm sketched out")
             print(f"* Ceva and others have no clear documentation of the max cargo bytes value")

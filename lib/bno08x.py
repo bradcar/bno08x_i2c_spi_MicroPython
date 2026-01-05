@@ -65,6 +65,7 @@ keeping up with the sensor and the sensor packages multiple packets together and
 returns data for the latest of each package of reports.
 
 TODO: reorg method order
+TODO: create continuation code for UART
 
 Possible future projects:
 FUTURE: Capture all report data in a multi-package report (without overwrite), provide user all results
@@ -73,7 +74,7 @@ FUTURE: include estimated ange in full quaternion implementation, maybe make new
 FUTURE: process two ARVR reports (rotation vector has estimated angle which has a different Q-point)
 """
 
-__version__ = "0.9.9"
+__version__ = "0.9.8"
 __repo__ = "https://github.com/bradcar/bno08x_i2c_spi_MicroPython"
 
 from math import asin, atan2, degrees
@@ -799,7 +800,7 @@ class BNO08X:
         if self._reset_mismatch:
             raise RuntimeError(f"{reset_type} reset cause mismatch; check reset_pin wiring")
 
-        raise RuntimeError(f"{reset_type} reset not acknowledged, check BNO086 wiring")
+        raise RuntimeError(f"{reset_type} reset not acknowledged, check BNO08x wiring, if SPI/BNO used before UART/BNO then power cycle BNO")
 
     def _packet_decode(self, packet_length, channel, seq, payload):
         """Packet decode for debugging driver for both read & send packets"""

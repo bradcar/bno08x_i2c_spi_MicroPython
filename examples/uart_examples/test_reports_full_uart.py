@@ -23,7 +23,7 @@ from utime import ticks_ms
 int_pin = Pin(14, Pin.IN, Pin.PULL_UP)  # BNO sensor (INT)
 reset_pin = Pin(15, Pin.OUT, value=1)  # BNO sensor (RST)
 
-uart = UART(1, baudrate=3000000, tx=Pin(8), rx=Pin(9), rxbuf=1024)
+uart = UART(1, baudrate=3000000, tx=Pin(8), rx=Pin(9))
 print(uart)  # baudrate 3000000 required
 
 bno = BNO08X_UART(uart, reset_pin=reset_pin, int_pin=int_pin)
