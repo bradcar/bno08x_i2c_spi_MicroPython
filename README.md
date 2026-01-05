@@ -335,6 +335,12 @@ For more details on the procedure to calibrate the BNO08x, refer to the BNO08x S
 application note.
 - https://cdn.sparkfun.com/assets/9/e/1/d/9/Sensor-Calibration-Procedure-v1.1.pdf
 
+## Sample use of library - output results to Vpython to show sensor orientation
+
+I created a VPython code that runs on a mac that reads data created on a Raspberry Pi Pico 2 W and a BNO086 sensor.
+That code can be found here:
+https://github.com/bradcar/vpython_imu_tracker
+
 ## Raw Reports - Be Careful!
     BNO_REPORT_RAW_ACCELEROMETER
     BNO_REPORT_RAW_GYROSCOPE
