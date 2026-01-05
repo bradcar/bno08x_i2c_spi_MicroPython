@@ -65,8 +65,6 @@ keeping up with the sensor and the sensor packages multiple packets together and
 returns data for the latest of each package of reports.
 
 TODO: reorg method order
-TODO: inline _insert_command_request_report
-TODO: implement continuation codes for i2c, spi, and uart
 
 Possible future projects:
 FUTURE: Capture all report data in a multi-package report (without overwrite), provide user all results
@@ -75,7 +73,7 @@ FUTURE: include estimated ange in full quaternion implementation, maybe make new
 FUTURE: process two ARVR reports (rotation vector has estimated angle which has a different Q-point)
 """
 
-__version__ = "0.9.8"
+__version__ = "0.9.9"
 __repo__ = "https://github.com/bradcar/bno08x_i2c_spi_MicroPython"
 
 from math import asin, atan2, degrees
@@ -1038,17 +1036,30 @@ class BNO08X:
 
     @staticmethod
     def euler_conversion(i, j, k, r):
-        """Converts quaternion to Euler angles(degrees). Aerospace/robotics convention (XYZ order: roll-pitch-yaw)"""
-        jsqr = j * j
-        t0 = 2.0 * (r * i + j * k)
-        t1 = 1.0 - 2.0 * (i * i + jsqr)
+        """
+        Converts quaternion to Euler angles(degrees).
+        Sequence: Z-Y-X (Yaw-Pitch-Roll).
+        """
+        two_r = 2.0 * r
+        two_i = 2.0 * i
+        two_j = 2.0 * j
+
+        t0 = two_r * i + two_j * k
+        t1 = 1.0 - 2.0 * (i * i + j * j)
         roll = degrees(atan2(t0, t1))
-        t2 = 2.0 * (r * j - k * i)
-        t2 = max(-1.0, min(1.0, t2))
+
+        t2 = two_r * j - k * two_i
+        # Clamp to avoid NaN from float precision errors
+        if t2 > 1.0:
+            t2 = 1.0
+        elif t2 < -1.0:
+            t2 = -1.0
         pitch = degrees(asin(t2))
-        t3 = 2.0 * (r * k + i * j)
-        t4 = 1.0 - 2.0 * (jsqr + k * k)
+
+        t3 = two_r * k + two_i * j
+        t4 = 1.0 - 2.0 * (j * j + k * k)
         yaw = degrees(atan2(t3, t4))
+
         return roll, pitch, yaw
 
     @staticmethod
