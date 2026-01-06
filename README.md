@@ -180,10 +180,22 @@ Only the most recent report for each sensor is stored and returned.
 
 ## Euler Angles, Gimbal Lock, and Quaternions
 
-Euler angles suffer from a well-known issue called Gimbal Lock.
+Euler angle conventions: This library uses Robotics/Android ENU convention (East, North, Up).
+It uses the X-Y-Z sequence (often called Roll-Pitch-Yaw)
+- Axes: X points East, Y points North, and Z points Up toward the sky. 
+- Gravity: A stationary sensor "feels" +1g on the Z-axis.
+- It aligns with the standard Cartesian (x,y) graph we learned in school (X is right, Y is forward).
+
+The other conveion used in some implementations is the Aerospace NED (North East Down).
+- Axes: X points North, Y points East, and Z points Down into the Earth. 
+- Gravity: A stationary sensor on a table "feels" −1g on the Z-axis. 
+- For pilots, it’s more intuitive for navigation. Because "Yaw" corresponds to a compass heading (0 is North, 90 is East).
+
+All Euler angles suffer from a well-known issue called Gimbal Lock. Using Quaternions in code avoids this.
 Gimbal lock occurs when two rotation axes align, which removes one degree of freedom. When a degree of freedom is
 lost, some orientations will have multiple valid representations.
 A well-known example occurred during the Apollo 11 mission.
+
 Quaternions avoid this by providing a unique representation for every possible orientation.
 Quaternions represents rotation with multiple "single axis and rotation angles".
 Most computer games use this implementation for smooth and predictable graphics.

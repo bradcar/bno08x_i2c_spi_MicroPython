@@ -1044,7 +1044,8 @@ class BNO08X:
     def euler_conversion(i, j, k, r):
         """
         Converts quaternion to Euler angles(degrees).
-        Sequence: Z-Y-X (Yaw-Pitch-Roll).
+        Robotics/Android ENU, ENU (East-North-Up).
+        X-Y-Z sequence (often referred to as Roll-Pitch-Yaw
         """
         two_r = 2.0 * r
         two_i = 2.0 * i
