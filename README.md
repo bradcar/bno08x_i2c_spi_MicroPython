@@ -19,7 +19,8 @@ BNO08x also uses I2C clock stretching which can cause issues on many microcontro
 
 ## Note: API change for Quaternion, and Euler in version 1.1 
 
-[!NOTE] In version 1.1, we changed the API for Quaternion & Euler parameters to match most other libraries including SparkFun & Adafruit, see section below.
+> [!NOTE]
+> In version 1.1, we changed the API for Quaternion & Euler parameters to match most other libraries including SparkFun & Adafruit, see section below.
 
 ## Setting up the BNO08x Sensor
 
