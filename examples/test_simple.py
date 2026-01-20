@@ -4,7 +4,7 @@
 #
 # I2C interface: Test simple sensor report for acceleration
 #
-# Reports enabled at 250Hz (4 msec between reports)
+# Reports requested at 100 Hz, sensor chooses 125Hz (8 msec between reports)
 # It prints so much data that your console may not keep up.
 
 from bno08x import *

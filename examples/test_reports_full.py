@@ -39,16 +39,16 @@ bno.print_report_period()
 
 print("\nStart loop:")
 while True:
-    
+
     # Update required each loop to check if any sensor updated, print timestamp if any sensor was updated
-    if bno.update_sensors() > 0:    
+    if bno.update_sensors() > 0:
         ms_since_sensor_start = bno.bno_start_diff(ticks_ms())
         print(f"\nsystem {ticks_ms()=},",
-            f"time from BNO start: {ms_since_sensor_start/1000.0:.3f} s",
-            f"({ms_since_sensor_start:.0f} ms)")
-    
+              f"time from BNO start: {ms_since_sensor_start / 1000.0:.3f} s",
+              f"({ms_since_sensor_start:.0f} ms)")
+
     # Only print sensor report if it has been updated since last loop
-    
+
     if bno.acceleration.updated:
         accel_x, accel_y, accel_z, acc, ts_ms = bno.acceleration.full
         print(f"\nAcceleration X: {accel_x:+.3f}  Y: {accel_y:+.3f}  Z: {accel_z:+.3f}  m/s²")
@@ -65,10 +65,10 @@ while True:
         print(f"Gyroscope: accuracy={acc}, {ts_ms=:.1f}")
 
     if bno.quaternion.updated:
-        quat_i, quat_j, quat_k, quat_real, acc, ts_ms = bno.quaternion.full
-        print(f"Quaternion   I: {quat_i:+.3f}  J: {quat_j:+.3f}  K: {quat_k:+.3f}  Real: {quat_real:+.3f}")
+        qr, qi, qj, qk, acc, ts_ms = bno.quaternion.full
+        print(f"Quaternion  Real: {qr:+.3f} I: {qi:+.3f}  J: {qj:+.3f}  K: {qk:+.3f}")
         print(f"Quaternion: accuracy={acc}, {ts_ms=:.1f}")
 
-        roll, pitch, yaw, acc, ts_ms = bno.quaternion.euler_full
-        print(f"Euler Angle: Roll {roll:+.3f}°  Pitch: {pitch:+.3f}°  Yaw: {yaw:+.3f}°  degrees")
+        yaw, pitch, roll, acc, ts_ms = bno.quaternion.euler_full
+        print(f"Euler Angle: Yaw: {yaw:+.3f}°   Pitch: {pitch:+.3f}°  Roll {roll:+.3f}° degrees")
         print(f"Euler Angle: accuracy={acc}, {ts_ms=:.1f}")

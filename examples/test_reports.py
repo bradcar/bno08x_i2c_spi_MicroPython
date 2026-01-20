@@ -35,7 +35,7 @@ bno.print_report_period()
 print("\nStart loop:")
 while True:
     # Update required each loop to check if any sensor updated, print sensor data (some or all may be old data)
-    # see test_reports_full.py, for example of only printing a sensor when it is updated
+    # see test_reports_full_spi.py, for example of only printing a sensor when it is updated
     bno.update_sensors()
 
     print(f"\nsystem {ticks_ms()=}")
@@ -49,8 +49,8 @@ while True:
     gyro_x, gyro_y, gyro_z = bno.gyro
     print(f"Gyroscope    X: {gyro_x:+.3f}  Y: {gyro_y:+.3f}  Z: {gyro_z:+.3f}  rads/s")
 
-    quat_i, quat_j, quat_k, quat_real = bno.quaternion
-    print(f"Quaternion   I: {quat_i:+.3f}  J: {quat_j:+.3f}  K: {quat_k:+.3f}  Real: {quat_real:+.3f}")
+    qr, qi, qj, qk = bno.quaternion
+    print(f"Quaternion   QR: {qr:+.3f}  QI: {qi:+.3f}  QJ: {qj:+.3f}  QK: {qk:+.3f}")
 
-    roll, pitch, yaw = bno.quaternion.euler
-    print(f"Euler Angle: Roll {roll:+.3f}°  Pitch: {pitch:+.3f}°  Yaw: {yaw:+.3f}°  degrees")
+    yaw, pitch, roll = bno.quaternion.euler
+    print(f"Euler Angle: Yaw: {yaw:+.3f}°   Pitch: {pitch:+.3f}°  Roll {roll:+.3f}° degrees")
