@@ -20,10 +20,7 @@ BNO08x also uses I2C clock stretching which can cause issues on many microcontro
 ## Note: API change for Quaternion, and Euler in version 1.1 
 
 [!NOTE]
-In version 1.1, we changed the API for Quaternion & Euler parameters to match most other libraries including SparkFun & Adafruit.
-However, please note that Adafruit and this implemebtion have the same pitch orientation, but Sparkfun's pitch is the negative value.
-Also note that this "roll" in this library matches the silk screen on the Sparkfun sensor board, but Sparkfun and Adafruit are negatives of that.
-Details are in the section at the end of this README.md
+In version 1.1, we changed the API for Quaternion & Euler parameters to match most other libraries including SparkFun & Adafruit, see section below.
 
 ## Setting up the BNO08x Sensor
 
