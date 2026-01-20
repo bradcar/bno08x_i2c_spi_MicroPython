@@ -4,7 +4,7 @@
 #
 # SPI interface: Test simple sensor report for acceleration
 #
-# Reports enabled at 250Hz (4 msec between reports)
+# Reports requested at 100 Hz, sensor chooses 125Hz (8 msec between reports)
 # It prints so much data that your console may not keep up.
 
 from bno08x import *
@@ -40,4 +40,4 @@ while True:
         accel_x, accel_y, accel_z = bno.acceleration
         print(f"Accel  X: {accel_x:+.3f}  Y: {accel_y:+.3f}  Z: {accel_z:+.3f}")
 
-        # Notice Gravity acceleration downwards (~9.8 m/s²)
+        # Notice Gravity acceleration downwards (about +9.8 m/s²)

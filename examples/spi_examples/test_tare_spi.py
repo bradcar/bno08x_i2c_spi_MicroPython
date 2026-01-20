@@ -38,10 +38,10 @@ while secs > 0:
     if ticks_diff(ticks_ms(), start) < 1000:
         continue
 
-    quat_i, quat_j, quat_k, quat_real = bno.quaternion
-    print(f"\nt={secs}: Quaternion:  I: {quat_i:+.3f}  J: {quat_j:+.3f}  K: {quat_k:+.3f}  Real: {quat_real:+.3f}")
-    roll, pitch, yaw = bno.euler_conversion(quat_i, quat_j, quat_k, quat_real)
-    print(f"     Euler Angle: Roll {roll:+.1f}°  Pitch: {pitch:+.1f}°  Yaw: {yaw:+.1f}°  degrees")
+    qr, qi, qj, qk = bno.quaternion
+    print(f"Quaternion  QR: {qr:+.3f}  QI: {qi:+.3f}  QJ: {qj:+.3f}  QK: {qk:+.3f}")
+    yaw, pitch, roll = bno.euler_conversion(qr, qi, qj, qk)
+    print(f"     Euler  Yaw: {yaw:+.1f}°   Pitch: {pitch:+.1f}°  Roll {roll:+.1f}° degrees")
 
     start = ticks_ms()
     secs -= 1
@@ -62,10 +62,10 @@ while secs > 0:
     if ticks_diff(ticks_ms(), start) < 1000:
         continue
 
-    quat_i, quat_j, quat_k, quat_real = bno.quaternion
-    print(f"\nt={secs}: Quaternion:  I: {quat_i:+.3f}  J: {quat_j:+.3f}  K: {quat_k:+.3f}  Real: {quat_real:+.3f}")
-    roll, pitch, yaw = bno.euler_conversion(quat_i, quat_j, quat_k, quat_real)
-    print(f"     Euler Angle: Roll {roll:+.1f}°  Pitch: {pitch:+.1f}°  Yaw: {yaw:+.1f}°  degrees")
+    qr, qi, qj, qk = bno.quaternion
+    print(f"Quaternion   QR: {qr:+.3f}  QI: {qi:+.3f}  QJ: {qj:+.3f}  QK: {qk:+.3f}")
+    yaw, pitch, roll = bno.euler_conversion(qr, qi, qj, qk)
+    print(f"     Euler  Yaw: {yaw:+.1f}°   Pitch: {pitch:+.1f}°  Roll {roll:+.1f}° degrees")
 
     start = ticks_ms()
     secs -= 1
