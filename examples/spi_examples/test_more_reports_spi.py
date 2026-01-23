@@ -9,7 +9,7 @@ from bno08x import *
 from machine import SPI, Pin
 from spi import BNO08X_SPI
 
-int_pin = Pin(14, Pin.IN, Pin.PULL_UP)  # Interrupt, enables BNO to signal when ready
+int_pin = Pin(14, Pin.IN)  # Interrupt, enables BNO to signal when ready
 reset_pin = Pin(15, Pin.OUT, value=1)  # Reset to signal BNO to reset
 
 # miso=Pin(16) - BNO SO (POCI)
