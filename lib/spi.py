@@ -79,7 +79,7 @@ class BNO08X_SPI(BNO08X):
         if not isinstance(int_pin, Pin):
             raise TypeError("int_pin must be a Pin object, not {type(int_pin)}")
         self._int_pin = int_pin
-        self._int_pin.init(Pin.IN, Pin.PULL_UP)  # guarantee int_pin is properly set up
+        self._int_pin.init(Pin.IN)  # guarantee int_pin is properly set up
 
         if reset_pin is not None and not isinstance(reset_pin, Pin):
             raise TypeError(f"reset_pin (RST) must be a Pin object or None, not {type(reset_pin)}")
@@ -164,7 +164,7 @@ class BNO08X_SPI(BNO08X):
         if not is_continuation and packet_bytes <= self._max_header_plus_cargo:
             # * comment out self._dbg for normal operation, self._dbg very slow if uncommented even if debug=False
             # if self._debug:
-            #     self._dbg(f" Received Packet *************{self._packet_decode(payload_bytes + 4, channel, seq, Fragment_mv)}")
+            #     self._dbg(f" Received Packet *************{self._packet_decode(payload_bytes + 4, channel, seq, fragment_mv)}")
             return fragment_mv, channel, fragment_bytes
 
         # Multipart assembly

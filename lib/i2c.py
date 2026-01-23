@@ -79,7 +79,7 @@ class BNO08X_I2C(BNO08X):
         if not isinstance(int_pin, Pin):
             raise TypeError(f"int_pin must be a Pin object, not {type(int_pin)}.")
         self._int_pin = int_pin
-        self._int_pin.init(Pin.IN, Pin.PULL_UP)  # guarantee int_pin is properly set up
+        self._int_pin.init(Pin.IN)  # guarantee int_pin is properly set up
 
         if reset_pin is not None and not isinstance(reset_pin, Pin):
             raise TypeError(f"Reset (RST) pin must be a Pin object or None, not {type(reset_pin)}")
