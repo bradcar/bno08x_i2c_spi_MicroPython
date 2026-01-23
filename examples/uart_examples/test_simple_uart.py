@@ -13,7 +13,7 @@ from uart import BNO08X_UART
 
 # UART1-tx=Pin(8) - BNO SCI
 # UART1-rx=Pin(9) - BNO SDA
-int_pin = Pin(14, Pin.IN, Pin.PULL_UP)  # Interrupt, BNO (RST) signals when ready
+int_pin = Pin(14, Pin.IN)  # Interrupt, BNO (RST) signals when ready
 reset_pin = Pin(15, Pin.OUT, value=1)  # Reset, tells BNO (INT) to reset
 
 uart = UART(1, baudrate=3000000, tx=Pin(8), rx=Pin(9))
